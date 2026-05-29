@@ -171,6 +171,44 @@
     .depth-bar > div {
       height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple));
     }
+
+    /* --- Phase 4 knowledge graph --- */
+    .graph-controls {
+      display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;
+    }
+    .graph-controls label {
+      font-size: 10px; color: var(--text-dim); display: flex; gap: 7px; align-items: center;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .graph-controls select, .graph-controls input[type=range] {
+      background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 4px;
+      padding: 4px 6px; font-family: inherit; font-size: 11px;
+    }
+    .graph-controls select { max-width: 360px; }
+    .graph-controls .depth-val { color: var(--text); font-variant-numeric: tabular-nums; }
+    .graph-svg-wrap {
+      width: 100%; background: var(--panel-2);
+      border: 1px solid var(--border-soft); border-radius: 6px; overflow: hidden;
+    }
+    #graph-svg { width: 100%; height: 480px; display: block; }
+    .gnode { cursor: pointer; }
+    .gnode circle { transition: stroke-width 0.1s; }
+    .gnode:hover circle { stroke-width: 3px; }
+    .gnode text {
+      font-size: 9px; fill: var(--text-dim); pointer-events: none;
+      paint-order: stroke; stroke: var(--bg); stroke-width: 2.5px; stroke-linejoin: round;
+    }
+    .gnode.focus text { fill: var(--text); font-size: 10px; }
+    .gedge { stroke-width: 1.6px; fill: none; }
+    .graph-legend {
+      display: flex; gap: 16px; flex-wrap: wrap; font-size: 10px;
+      color: var(--text-dim); margin-top: 12px; align-items: center;
+    }
+    .graph-legend span { display: flex; gap: 6px; align-items: center; }
+    .graph-legend i.swatch { width: 18px; height: 0; border-top: 2px solid; display: inline-block; }
+    .graph-legend i.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .graph-empty { padding: 60px 8px; text-align: center; color: var(--text-faint); font-style: italic; font-size: 11px; }
   </style>
 </head>
 <body>
@@ -390,6 +428,63 @@
         <div id="proc-active-list">
           <div class="empty-msg-soft">no active artifacts</div>
         </div>
+      </div>
+    </div>
+
+    <!-- Phase 4 — bi-temporal knowledge graph -->
+    <div class="section">
+      <h2>
+        <span class="col-tag">PHASE 4</span>
+        knowledge graph
+        <span class="hint">bi-temporal property graph · scope-filtered · replay-rebuilt from the log</span>
+        <span id="graph-state-pill" class="pill off">empty</span>
+      </h2>
+      <div class="kpi-row" style="margin-bottom: 14px;">
+        <div class="kpi">
+          <div class="label">nodes</div>
+          <div class="value"><span id="graph-nodes">—</span></div>
+          <div class="sub">memories in the graph</div>
+        </div>
+        <div class="kpi">
+          <div class="label">live edges</div>
+          <div class="value"><span id="graph-live-edges">—</span></div>
+          <div class="sub"><span id="graph-total-edges">0</span> total incl. tombstoned</div>
+        </div>
+        <div class="kpi">
+          <div class="label">graph health</div>
+          <div class="value"><span id="graph-health">—</span><span class="unit">%</span></div>
+          <div class="sub">live ÷ total edges</div>
+        </div>
+        <div class="kpi">
+          <div class="label">neighborhood</div>
+          <div class="value"><span id="graph-shown">—</span></div>
+          <div class="sub"><span id="graph-edges-shown">0</span> edge(s) at current depth</div>
+        </div>
+      </div>
+      <div class="graph-controls">
+        <label>focus
+          <select id="graph-root-picker"><option value="">—</option></select>
+        </label>
+        <label>depth
+          <input type="range" id="graph-depth" min="1" max="4" value="2" />
+          <span class="depth-val" id="graph-depth-val">2</span>
+        </label>
+      </div>
+      <div class="graph-svg-wrap">
+        <svg id="graph-svg" viewBox="0 0 760 480" preserveAspectRatio="xMidYMid meet">
+          <text x="380" y="240" text-anchor="middle" class="graph-empty-text"
+                fill="#6e7681" font-size="12" font-style="italic">no graph yet — run the demo</text>
+        </svg>
+      </div>
+      <div class="graph-legend">
+        <span><i class="dot" style="background:#58a6ff"></i> focus</span>
+        <span><i class="dot" style="background:#79c0ff"></i> 1-hop</span>
+        <span><i class="dot" style="background:#d2a8ff"></i> 2+ hop</span>
+        <span><i class="dot" style="background:#f85149"></i> invalidated</span>
+        <span><i style="width:11px;height:11px;background:#56d364;border-radius:2px;display:inline-block"></i> source doc</span>
+        <span style="margin-left:8px"><i class="swatch" style="border-color:#8b949e"></i> linked</span>
+        <span><i class="swatch" style="border-color:#f0883e;border-top-style:dashed"></i> evolved</span>
+        <span><i class="swatch" style="border-color:#56d364;border-top-style:dotted"></i> contained-in</span>
       </div>
     </div>
   </main>
@@ -759,12 +854,191 @@
       }
     }
 
+    // --- Phase 4: knowledge graph ---
+    const SVGNS = 'http://www.w3.org/2000/svg';
+    const GRAPH = { focus: null, depth: 2, userPicked: false };
+    const NODE_COLORS = { focus: '#58a6ff', hop1: '#79c0ff', hopN: '#d2a8ff', dead: '#f85149' };
+    const EDGE_STYLE = {
+      linked:       { color: '#8b949e', dash: null },
+      evolved_from: { color: '#f0883e', dash: '5,3' },
+      evolved_to:   { color: '#f0883e', dash: '5,3' },
+      contained_in: { color: '#56d364', dash: '2,3' },
+    };
+
+    function svgEl(name, attrs) {
+      const el = document.createElementNS(SVGNS, name);
+      for (const k in attrs) el.setAttribute(k, attrs[k]);
+      return el;
+    }
+
+    const SOURCE_COLOR = '#56d364';
+
+    function nodeColor(n) {
+      if (n.invalidated) return NODE_COLORS.dead;
+      if (n.is_source) return SOURCE_COLOR;
+      if (n.hop === 0) return NODE_COLORS.focus;
+      if (n.hop === 1) return NODE_COLORS.hop1;
+      return NODE_COLORS.hopN;
+    }
+
+    // Concentric radial layout: focus at center, each hop ring further out.
+    function layout(nodes) {
+      const W = 760, H = 480, cx = W / 2, cy = H / 2;
+      const byHop = {};
+      nodes.forEach(n => { (byHop[n.hop] = byHop[n.hop] || []).push(n); });
+      const maxHop = Math.max(0, ...nodes.map(n => n.hop ?? 0));
+      const ringStep = maxHop > 0 ? Math.min(150, (Math.min(W, H) / 2 - 60) / maxHop) : 0;
+      const pos = {};
+      Object.keys(byHop).forEach(hopStr => {
+        const hop = +hopStr;
+        const ring = byHop[hop];
+        if (hop === 0) { ring.forEach(n => { pos[n.id] = { x: cx, y: cy }; }); return; }
+        const r = ringStep * hop;
+        ring.forEach((n, i) => {
+          const a = (2 * Math.PI * i) / ring.length - Math.PI / 2;
+          pos[n.id] = { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+        });
+      });
+      return pos;
+    }
+
+    function renderGraph(data) {
+      const svg = document.getElementById('graph-svg');
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      const nodes = data.nodes || [];
+      if (!nodes.length) {
+        svg.appendChild(svgEl('text', { x: 380, y: 240, 'text-anchor': 'middle',
+          fill: '#6e7681', 'font-size': 12, 'font-style': 'italic' }))
+          .textContent = data.focus ? 'focus node has no visible neighbors' : 'pick a focus node';
+        return;
+      }
+      const pos = layout(nodes);
+
+      // Edges first so nodes paint on top.
+      (data.edges || []).forEach(e => {
+        const a = pos[e.from], b = pos[e.to];
+        if (!a || !b) return;
+        const style = EDGE_STYLE[e.relation] || EDGE_STYLE.linked;
+        const line = svgEl('line', {
+          x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+          class: 'gedge', stroke: style.color, 'stroke-opacity': 0.65,
+        });
+        if (style.dash) line.setAttribute('stroke-dasharray', style.dash);
+        svg.appendChild(line);
+      });
+
+      // Nodes.
+      nodes.forEach(n => {
+        const p = pos[n.id];
+        if (!p) return;
+        const g = svgEl('g', { class: 'gnode' + (n.hop === 0 ? ' focus' : '') });
+        const r = n.hop === 0 ? 11 : (n.hop === 1 ? 7 : 5.5);
+        // Source documents render as squares; memories as circles.
+        const shape = n.is_source
+          ? svgEl('rect', {
+              x: p.x - r, y: p.y - r, width: r * 2, height: r * 2, rx: 2,
+              fill: nodeColor(n), 'fill-opacity': n.invalidated ? 0.4 : 0.9,
+              stroke: n.invalidated ? NODE_COLORS.dead : '#0d1117', 'stroke-width': 1.5,
+            })
+          : svgEl('circle', {
+              cx: p.x, cy: p.y, r,
+              fill: nodeColor(n), 'fill-opacity': n.invalidated ? 0.4 : 0.9,
+              stroke: n.invalidated ? NODE_COLORS.dead : '#0d1117', 'stroke-width': 1.5,
+            });
+        const titleParts = [n.label];
+        if (n.is_source) titleParts.push('source document');
+        if (n.evolution_count) titleParts.push(`evo ×${n.evolution_count}`);
+        if (n.invalidated) titleParts.push('invalidated');
+        if (n.is_chunk) titleParts.push('chunk');
+        const title = svgEl('title', {});
+        title.textContent = titleParts.join(' · ') + `  (${n.id.slice(-6)})`;
+        g.appendChild(shape);
+        g.appendChild(title);
+        const label = (n.label || '').length > 22 ? n.label.slice(0, 21) + '…' : n.label;
+        const txt = svgEl('text', { x: p.x, y: p.y - r - 4, 'text-anchor': 'middle' });
+        txt.textContent = label;
+        g.appendChild(txt);
+        // Click a node to re-focus on it.
+        g.addEventListener('click', () => {
+          GRAPH.focus = n.id; GRAPH.userPicked = true;
+          const picker = document.getElementById('graph-root-picker');
+          if ([...picker.options].some(o => o.value === n.id)) picker.value = n.id;
+          loadGraph();
+        });
+        svg.appendChild(g);
+      });
+    }
+
+    function syncPicker(roots, focus) {
+      const picker = document.getElementById('graph-root-picker');
+      const ids = roots.map(r => r.id).join(',');
+      if (picker.dataset.ids !== ids) {
+        picker.dataset.ids = ids;
+        picker.innerHTML = roots.length
+          ? roots.map(r => {
+              const deg = (r.out_degree ?? 0) + (r.in_degree ?? 0);
+              return `<option value="${r.id}">${escapeHtml(r.label)} · deg ${deg} · …${escapeHtml(r.id.slice(-6))}</option>`;
+            }).join('')
+          : '<option value="">—</option>';
+      }
+      if (focus && [...picker.options].some(o => o.value === focus)) picker.value = focus;
+    }
+
+    async function loadGraph() {
+      try {
+        const params = new URLSearchParams();
+        if (GRAPH.focus) params.set('id', GRAPH.focus);
+        params.set('depth', GRAPH.depth);
+        const r = await fetch('/api/graph?' + params.toString());
+        if (!r.ok) return;
+        const data = await r.json();
+
+        // Stats KPIs.
+        const s = data.stats || { node_count: 0, edge_count: 0, live_edge_count: 0 };
+        document.getElementById('graph-nodes').textContent = s.node_count;
+        document.getElementById('graph-live-edges').textContent = s.live_edge_count;
+        document.getElementById('graph-total-edges').textContent = s.edge_count;
+        document.getElementById('graph-health').textContent =
+          s.edge_count ? Math.round((s.live_edge_count / s.edge_count) * 100) : '—';
+        document.getElementById('graph-shown').textContent = (data.nodes || []).length;
+        document.getElementById('graph-edges-shown').textContent = (data.edges || []).length;
+
+        const pill = document.getElementById('graph-state-pill');
+        if (s.node_count > 0) { pill.textContent = `${s.node_count} nodes`; pill.className = 'pill on'; }
+        else { pill.textContent = 'empty'; pill.className = 'pill off'; }
+
+        // Auto-pick the most-connected root the first time we see data.
+        if (!GRAPH.userPicked && !GRAPH.focus && (data.roots || []).length) {
+          GRAPH.focus = data.roots[0].id;
+          syncPicker(data.roots, GRAPH.focus);
+          return loadGraph();
+        }
+        syncPicker(data.roots || [], data.focus);
+        renderGraph(data);
+      } catch (err) {
+        console.warn('graph fetch failed', err);
+      }
+    }
+
+    document.getElementById('graph-root-picker').addEventListener('change', (e) => {
+      GRAPH.focus = e.target.value || null;
+      GRAPH.userPicked = true;
+      loadGraph();
+    });
+    document.getElementById('graph-depth').addEventListener('input', (e) => {
+      GRAPH.depth = +e.target.value;
+      document.getElementById('graph-depth-val').textContent = e.target.value;
+      loadGraph();
+    });
+
     refresh();
     refreshEvolve();
     refreshProcedural();
+    loadGraph();
     setInterval(refresh, 3000);
     setInterval(refreshEvolve, 3000);
     setInterval(refreshProcedural, 3000);
+    setInterval(loadGraph, 3000);
   </script>
 </body>
 </html>

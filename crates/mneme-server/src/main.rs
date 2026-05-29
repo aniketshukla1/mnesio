@@ -23,6 +23,7 @@ mod demo;
 mod demo_llm;
 mod demo_procedural;
 mod embedding_worker;
+mod graph_worker;
 mod metrics;
 mod viz;
 
@@ -32,6 +33,7 @@ use mneme_core::event::Event;
 use mneme_core::traits::MaterializedView;
 use mneme_core::{Embedder, EventLog, LlmClient, MnemeError, Retriever};
 use mneme_evolve::EvolveConfig;
+use mneme_graph::FjallGraphView;
 use mneme_index::{
     Bm25View, FastEmbedEmbedder, HybridRetriever, MockEmbedder, SnippetSynthesizer, VectorView,
 };
@@ -112,6 +114,31 @@ async fn main() -> anyhow::Result<()> {
         embedder.clone(),
     ));
 
+    // Phase 4 — bi-temporal property graph view. Persistent: it owns its
+    // own fjall keyspace under `<data_dir>/graph`, so unlike the in-memory
+    // vector/BM25 views it isn't rebuilt from scratch each boot. We catch
+    // it up from its own checkpoint to the current log head before serving,
+    // then let the async graph worker tail anything that arrives later
+    // (including the evolution worker's `MemoryEvolved` / `…LinksUpdated`
+    // events). Hard Rule #4: every view is rebuildable from the log.
+    let graph = FjallGraphView::open(data_dir.join("graph"))?;
+    let graph_checkpoint = graph.checkpoint().await?;
+    let mut graph_applied = 0usize;
+    for entry in &entries {
+        if let Some(cp) = graph_checkpoint {
+            if entry.id <= cp {
+                continue; // already durably applied in a previous run
+            }
+        }
+        graph.apply(entry).await?;
+        graph_applied += 1;
+    }
+    tracing::info!(
+        applied = graph_applied,
+        resumed_from = ?graph_checkpoint.map(|id| id.to_string()),
+        "graph view caught up to log head"
+    );
+
     // Extractive synthesizer — deterministic, no LLM, every word in the
     // answer comes from a real memory.
     let synthesizer: Arc<dyn mneme_core::Synthesizer> = Arc::new(SnippetSynthesizer::new());
@@ -120,6 +147,10 @@ async fn main() -> anyhow::Result<()> {
     // heavy embedder (Rule #5). Always on, regardless of demo mode — the
     // demo writer relies on it to fill embeddings.
     embedding_worker::spawn(log_trait.clone(), embedder.clone(), vector.clone());
+
+    // Phase 4 — graph view tail worker. Keeps the persistent graph in
+    // sync with the log as new events (demo writes, evolutions) land.
+    graph_worker::spawn(log_trait.clone(), graph.clone());
 
     if demo_mode {
         demo::spawn(log_trait.clone(), vector.clone(), bm25.clone());
@@ -215,6 +246,7 @@ async fn main() -> anyhow::Result<()> {
         log: log_trait,
         vector,
         bm25,
+        graph,
         embedder,
         retriever,
         synthesizer,
@@ -233,6 +265,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/metrics/history", get(viz::metrics_history))
         .route("/api/evolve/metrics", get(viz::evolve_metrics))
         .route("/api/procedural/metrics", get(viz::procedural_metrics))
+        .route("/api/graph", get(viz::graph))
         .route("/static/chart.umd.min.js", get(viz::chart_js))
         .with_state(state);
 

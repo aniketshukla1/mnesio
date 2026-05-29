@@ -1,0 +1,18 @@
+[package]
+name = "mneme-graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mneme-core.workspace = true
+tokio.workspace = true
+serde.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+fjall.workspace = true
+bincode.workspace = true
+ulid.workspace = true
+time.workspace = true

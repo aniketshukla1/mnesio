@@ -29,18 +29,24 @@ use mneme_core::{
     Embedder, EventLog, Hit, Id, Query as RetrievalQuery, Retriever, Scope, Synthesizer,
 };
 use mneme_evolve::EvolutionWorker;
+use mneme_graph::{FjallGraphView, Relation};
 use mneme_index::{Bm25View, HybridRetriever, VectorView};
 use mneme_procedural::{ProceduralStore, ProceduralWorker};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
+use time::OffsetDateTime;
 
 /// Application state injected into every handler.
 pub struct AppState {
     pub log: Arc<dyn EventLog>,
     pub vector: Arc<VectorView>,
     pub bm25: Arc<Bm25View>,
+    /// Phase-4 bi-temporal property graph view. Fed from the log tail by
+    /// the graph worker; queried by `/api/graph` for neighborhood +
+    /// lineage exploration.
+    pub graph: Arc<FjallGraphView>,
     pub embedder: Arc<dyn Embedder>,
     pub retriever: Arc<HybridRetriever>,
     /// Extractive synthesizer used to compose the citation-bearing answer
@@ -1042,6 +1048,308 @@ fn artifact_kind_label(k: &mneme_core::entity::ArtifactKind) -> &'static str {
     }
 }
 
+// ---------- graph (Phase 4) ----------
+
+/// Hard cap on neighborhood radius. Keeps the response bounded
+/// regardless of what a caller asks for (Hard Rule #6 — bound the
+/// cascades, here applied to read-side fan-out).
+const MAX_GRAPH_DEPTH: u16 = 4;
+
+/// Number of candidate root nodes returned for the picker.
+const GRAPH_ROOT_LIMIT: usize = 12;
+
+fn default_graph_depth() -> u16 {
+    2
+}
+
+#[derive(Deserialize)]
+pub struct GraphParams {
+    /// Focus memory id (ULID string). When omitted the response carries
+    /// only `stats` + `roots`, so the UI can populate a picker and pick
+    /// a sensible default focus.
+    pub id: Option<String>,
+    #[serde(default = "default_graph_depth")]
+    pub depth: u16,
+    /// Optional bi-temporal cut, unix-epoch milliseconds. When set, the
+    /// neighborhood is returned *as it was* at that instant — lineage and
+    /// links resolve to the generation live at `as_of_ms`.
+    pub as_of_ms: Option<i64>,
+}
+
+/// `GET /api/graph` — bi-temporal property-graph exploration.
+///
+/// Two response modes in one shape:
+/// - **No `id`**: `stats` + `roots` (most-connected nodes). The UI
+///   auto-selects `roots[0]` as the initial focus.
+/// - **With `id`**: additionally returns the `depth`-bounded
+///   neighborhood (`nodes` + `edges`) around that memory. Traversal is
+///   undirected (follows both `Linked`/lineage out-edges and in-edges)
+///   so the focus node shows both what it cites and what cites it.
+///
+/// Everything is filtered through the server's default-tenant `Scope`
+/// (Hard Rule #3) and, when `as_of_ms` is set, through bi-temporal
+/// liveness.
+pub async fn graph(
+    State(state): State<Arc<AppState>>,
+    AxumQuery(params): AxumQuery<GraphParams>,
+) -> Response {
+    let scope = Scope::global(state.default_tenant.clone());
+    let as_of = match params.as_of_ms {
+        Some(ms) => match OffsetDateTime::from_unix_timestamp_nanos((ms as i128) * 1_000_000) {
+            Ok(t) => Some(t),
+            Err(_) => {
+                return (StatusCode::BAD_REQUEST, "as_of_ms out of range").into_response();
+            }
+        },
+        None => None,
+    };
+    let depth = params.depth.min(MAX_GRAPH_DEPTH);
+
+    let stats = match state.graph.stats() {
+        Ok(s) => GraphStatsDto {
+            node_count: s.node_count,
+            edge_count: s.edge_count,
+            live_edge_count: s.live_edge_count,
+        },
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("graph stats failed: {e}"),
+            )
+                .into_response();
+        }
+    };
+
+    let roots = match state.graph.roots(&scope, as_of, GRAPH_ROOT_LIMIT) {
+        Ok(rs) => rs
+            .iter()
+            .map(|nd| node_dto(&nd.node, None, Some((nd.out_degree, nd.in_degree))))
+            .collect::<Vec<_>>(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("graph roots failed: {e}"),
+            )
+                .into_response();
+        }
+    };
+
+    let mut focus: Option<String> = None;
+    let mut nodes: Vec<GraphNodeDto> = Vec::new();
+    let mut edges: Vec<GraphEdgeDto> = Vec::new();
+
+    if let Some(id_str) = &params.id {
+        let id = match id_str.parse::<Id>() {
+            Ok(id) => id,
+            Err(_) => {
+                return (StatusCode::BAD_REQUEST, "id is not a valid ULID").into_response();
+            }
+        };
+        let mref = MemoryRef(id);
+        match build_neighborhood(state.graph.as_ref(), mref, depth, &scope, as_of) {
+            Ok(Some((ns, es))) => {
+                focus = Some(id_str.clone());
+                nodes = ns;
+                edges = es;
+            }
+            // Focus node not visible (unknown / out of scope / not live
+            // at `as_of`) — return stats+roots with an empty neighborhood
+            // rather than a 404, so the UI can fall back to a root.
+            Ok(None) => {}
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("graph neighborhood failed: {e}"),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    let payload = GraphResponse {
+        stats,
+        roots,
+        focus,
+        depth,
+        as_of_ms: params.as_of_ms,
+        nodes,
+        edges,
+    };
+    no_cache(Json(payload).into_response())
+}
+
+/// Undirected, depth-bounded neighborhood around `focus`. Returns
+/// `None` when the focus node itself isn't visible to the caller.
+/// `Some((nodes, edges))` otherwise, with `edges` restricted to the
+/// returned node set so the rendered graph is closed.
+#[allow(clippy::type_complexity)]
+fn build_neighborhood(
+    graph: &FjallGraphView,
+    focus: MemoryRef,
+    depth: u16,
+    scope: &Scope,
+    as_of: Option<OffsetDateTime>,
+) -> Result<Option<(Vec<GraphNodeDto>, Vec<GraphEdgeDto>)>, mneme_core::MnemeError> {
+    let Some(focus_node) = graph.node(focus, scope, as_of)? else {
+        return Ok(None);
+    };
+
+    // BFS over the *undirected* graph (out-edges ∪ in-edges) so the
+    // focus shows both what it points at and what points at it.
+    let mut hop_of: HashMap<Id, u16> = HashMap::new();
+    hop_of.insert(focus.0, 0);
+    let mut order: Vec<(MemoryRef, u16)> = vec![(focus, 0)];
+    let mut frontier: VecDeque<(MemoryRef, u16)> = VecDeque::from([(focus, 0)]);
+    let mut node_records: HashMap<Id, mneme_graph::NodeRecord> = HashMap::new();
+    node_records.insert(focus.0, focus_node);
+
+    while let Some((node, d)) = frontier.pop_front() {
+        if d >= depth {
+            continue;
+        }
+        let out = graph.out_neighbors(node, None, scope, as_of)?;
+        let inc = graph.in_neighbors(node, None, scope, as_of)?;
+        let neighbors = out.iter().map(|e| e.dst).chain(inc.iter().map(|e| e.src));
+        for nref in neighbors {
+            if hop_of.contains_key(&nref.0) {
+                continue;
+            }
+            if let Some(n) = graph.node(nref, scope, as_of)? {
+                hop_of.insert(nref.0, d + 1);
+                node_records.insert(nref.0, n);
+                order.push((nref, d + 1));
+                frontier.push_back((nref, d + 1));
+            }
+        }
+    }
+
+    let node_set: HashSet<Id> = hop_of.keys().copied().collect();
+    let nodes: Vec<GraphNodeDto> = order
+        .iter()
+        .filter_map(|(r, hop)| {
+            node_records
+                .get(&r.0)
+                .map(|n| node_dto(n, Some(*hop), None))
+        })
+        .collect();
+
+    // Collect edges as out-edges of every node in the set whose dst is
+    // also in the set. Live edges are unique per (src, relation, dst),
+    // so no dedup is needed.
+    let mut edges: Vec<GraphEdgeDto> = Vec::new();
+    for (r, _) in &order {
+        for e in graph.out_neighbors(*r, None, scope, as_of)? {
+            if node_set.contains(&e.dst.0) {
+                edges.push(GraphEdgeDto {
+                    from: e.src.0.to_string(),
+                    to: e.dst.0.to_string(),
+                    relation: relation_label(e.relation),
+                    weight: e.weight,
+                });
+            }
+        }
+    }
+    Ok(Some((nodes, edges)))
+}
+
+/// Build a node DTO. `hop` is set for neighborhood nodes; `degree` is
+/// set for root candidates. A node is never both at once.
+fn node_dto(
+    n: &mneme_graph::NodeRecord,
+    hop: Option<u16>,
+    degree: Option<(usize, usize)>,
+) -> GraphNodeDto {
+    // Source nodes carry an explicit `label` (the document title).
+    // Memory nodes store no content (the log is the system of record),
+    // so their label is derived from tags → keywords → a short id
+    // suffix.
+    let label = if let Some(l) = &n.label {
+        l.clone()
+    } else if !n.tags.is_empty() {
+        n.tags.join(", ")
+    } else if !n.keywords.is_empty() {
+        n.keywords.join(", ")
+    } else {
+        let s = n.id.0.to_string();
+        format!("…{}", &s[s.len().saturating_sub(6)..])
+    };
+    GraphNodeDto {
+        id: n.id.0.to_string(),
+        label,
+        tags: n.tags.clone(),
+        evolution_count: n.evolution_count,
+        invalidated: n.tx_to.is_some(),
+        is_chunk: n.source.is_some(),
+        is_source: n.is_source,
+        hop,
+        out_degree: degree.map(|(o, _)| o),
+        in_degree: degree.map(|(_, i)| i),
+    }
+}
+
+fn relation_label(r: Relation) -> &'static str {
+    match r {
+        Relation::Linked => "linked",
+        Relation::EvolvedFrom => "evolved_from",
+        Relation::EvolvedTo => "evolved_to",
+        Relation::ContainedIn => "contained_in",
+    }
+}
+
+#[derive(Serialize)]
+pub struct GraphResponse {
+    pub stats: GraphStatsDto,
+    /// Most-connected nodes, for the focus picker. Always present.
+    pub roots: Vec<GraphNodeDto>,
+    /// The queried focus id, echoed back. `None` when no `id` was given.
+    pub focus: Option<String>,
+    /// Effective (capped) neighborhood radius.
+    pub depth: u16,
+    /// Bi-temporal cut echoed back, if any.
+    pub as_of_ms: Option<i64>,
+    /// Neighborhood nodes incl. focus. Empty when no focus.
+    pub nodes: Vec<GraphNodeDto>,
+    /// Edges among the neighborhood node set.
+    pub edges: Vec<GraphEdgeDto>,
+}
+
+#[derive(Serialize)]
+pub struct GraphStatsDto {
+    pub node_count: usize,
+    pub edge_count: usize,
+    pub live_edge_count: usize,
+}
+
+#[derive(Serialize)]
+pub struct GraphNodeDto {
+    pub id: String,
+    /// Display label derived from tags/keywords (graph stores no content).
+    pub label: String,
+    pub tags: Vec<String>,
+    pub evolution_count: u16,
+    /// `true` when the node has been tombstoned (`tx_to` set).
+    pub invalidated: bool,
+    /// `true` when the memory is a chunk of a `Source` document.
+    pub is_chunk: bool,
+    /// `true` when the node *is* a `Source` document (not a memory).
+    pub is_source: bool,
+    /// BFS distance from the focus. `None` for root candidates.
+    pub hop: Option<u16>,
+    /// Live out-degree. `Some` only for root candidates.
+    pub out_degree: Option<usize>,
+    /// Live in-degree. `Some` only for root candidates.
+    pub in_degree: Option<usize>,
+}
+
+#[derive(Serialize)]
+pub struct GraphEdgeDto {
+    pub from: String,
+    pub to: String,
+    /// `"linked" | "evolved_from" | "evolved_to" | "contained_in"`.
+    pub relation: &'static str,
+    pub weight: Option<f32>,
+}
+
 /// `GET /dashboard` — the long-view analytics page (Chart.js + history).
 ///
 /// Wrapped through `no_cache` so iterative dashboard edits during
@@ -1243,6 +1551,80 @@ mod tests {
         assert_eq!(boosted[0].memory, chunk);
         assert!(boosted[0].score > 0.05);
     }
+
+    fn node_record(tags: &[&str], keywords: &[&str]) -> mneme_graph::NodeRecord {
+        mneme_graph::NodeRecord {
+            id: MemoryRef(new_id()),
+            scope: Scope::global("demo"),
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+            keywords: keywords.iter().map(|s| s.to_string()).collect(),
+            source: None,
+            position: None,
+            evolution_count: 0,
+            valid_from: OffsetDateTime::UNIX_EPOCH,
+            valid_to: None,
+            tx_from: OffsetDateTime::UNIX_EPOCH,
+            tx_to: None,
+            label: None,
+            is_source: false,
+        }
+    }
+
+    #[test]
+    fn relation_label_covers_all_variants() {
+        assert_eq!(relation_label(Relation::Linked), "linked");
+        assert_eq!(relation_label(Relation::EvolvedFrom), "evolved_from");
+        assert_eq!(relation_label(Relation::EvolvedTo), "evolved_to");
+        assert_eq!(relation_label(Relation::ContainedIn), "contained_in");
+    }
+
+    #[test]
+    fn node_dto_label_prefers_tags_then_keywords_then_id() {
+        let with_tags = node_dto(
+            &node_record(&["earnings", "q3"], &["revenue"]),
+            Some(1),
+            None,
+        );
+        assert_eq!(with_tags.label, "earnings, q3");
+        assert_eq!(with_tags.hop, Some(1));
+        assert!(with_tags.out_degree.is_none());
+
+        let kw_only = node_dto(&node_record(&[], &["revenue"]), None, Some((2, 3)));
+        assert_eq!(kw_only.label, "revenue");
+        assert_eq!(kw_only.out_degree, Some(2));
+        assert_eq!(kw_only.in_degree, Some(3));
+
+        let bare = node_dto(&node_record(&[], &[]), None, None);
+        assert!(
+            bare.label.starts_with('…'),
+            "bare node falls back to a short id suffix, got {:?}",
+            bare.label
+        );
+    }
+
+    #[test]
+    fn node_dto_flags_invalidated_and_chunk() {
+        let mut n = node_record(&["x"], &[]);
+        n.tx_to = Some(OffsetDateTime::UNIX_EPOCH);
+        n.source = Some(mneme_core::types::SourceRef(new_id()));
+        let dto = node_dto(&n, Some(0), None);
+        assert!(dto.invalidated);
+        assert!(dto.is_chunk);
+        assert!(!dto.is_source);
+    }
+
+    #[test]
+    fn node_dto_source_node_uses_label_and_flag() {
+        // A source node carries an explicit label (the title) and the
+        // is_source flag; the label wins over tags/keywords.
+        let mut n = node_record(&["ignored-tag"], &["ignored-kw"]);
+        n.label = Some("Q3 Board Memo".into());
+        n.is_source = true;
+        let dto = node_dto(&n, Some(1), None);
+        assert_eq!(dto.label, "Q3 Board Memo");
+        assert!(dto.is_source);
+        assert!(!dto.is_chunk, "a source node is not itself a chunk");
+    }
 }
 
 fn event_kind(e: &Event) -> &'static str {
@@ -1259,6 +1641,7 @@ fn event_kind(e: &Event) -> &'static str {
         Event::ProceduralProposed { .. } => "ProceduralProposed",
         Event::ProceduralCommitted { .. } => "ProceduralCommitted",
         Event::ProceduralRejected { .. } => "ProceduralRejected",
+        Event::LearningCurveRecorded { .. } => "LearningCurveRecorded",
     }
 }
 
@@ -1336,5 +1719,17 @@ fn describe_event(e: &Event) -> String {
                 short(MemoryRef(proposal.0))
             )
         }
+        Event::LearningCurveRecorded {
+            artifact,
+            version,
+            benchmark_score,
+            safety_probe_pass_rate,
+            ..
+        } => format!(
+            "curve point …{} v{version} · bench={:.2} · safety={:.2}",
+            short(MemoryRef(artifact.0)),
+            benchmark_score,
+            safety_probe_pass_rate
+        ),
     }
 }

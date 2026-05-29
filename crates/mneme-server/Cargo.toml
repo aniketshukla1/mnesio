@@ -21,6 +21,7 @@ ollama = ["mneme-llm/ollama"]
 mneme-core.workspace = true
 mneme-store.workspace = true
 mneme-index.workspace = true
+mneme-graph.workspace = true
 mneme-evolve.workspace = true
 mneme-llm = { workspace = true, default-features = false }
 mneme-procedural.workspace = true
@@ -33,3 +34,4 @@ tower-http.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
+time.workspace = true
