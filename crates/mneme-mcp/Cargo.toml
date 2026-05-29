@@ -1,0 +1,28 @@
+[package]
+name = "mneme-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "mneme-mcp"
+path = "src/main.rs"
+
+[dependencies]
+mneme-core.workspace = true
+mneme-store.workspace = true
+mneme-index.workspace = true
+tokio = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+# Integration tests spawn the built binary; tempfile gives us a
+# clean data dir per test run that's auto-removed when the test
+# scope exits.
+tempfile = "3"
