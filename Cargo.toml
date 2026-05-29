@@ -4,10 +4,15 @@ members = [
     "crates/mneme-core",
     "crates/mneme-store",
     "crates/mneme-index",
+    "crates/mneme-graph",
+    "crates/mneme-extract",
     "crates/mneme-llm",
     "crates/mneme-evolve",
     "crates/mneme-procedural",
     "crates/mneme-server",
+    "crates/mneme-bench",
+    "crates/mneme-mcp",
+    "crates/mneme-py",
 ]
 
 [workspace.package]
@@ -22,9 +27,14 @@ rust-version = "1.79"
 mneme-core = { path = "crates/mneme-core" }
 mneme-store = { path = "crates/mneme-store" }
 mneme-index = { path = "crates/mneme-index" }
+mneme-graph = { path = "crates/mneme-graph" }
+mneme-extract = { path = "crates/mneme-extract" }
 mneme-llm = { path = "crates/mneme-llm", default-features = false }
 mneme-evolve = { path = "crates/mneme-evolve" }
 mneme-procedural = { path = "crates/mneme-procedural" }
+mneme-bench = { path = "crates/mneme-bench" }
+mneme-mcp = { path = "crates/mneme-mcp" }
+mneme-py = { path = "crates/mneme-py" }
 
 # --- foundation (see architecture report, "Rust Crate Survey") ---
 tokio = { version = "1", features = ["full"] }
