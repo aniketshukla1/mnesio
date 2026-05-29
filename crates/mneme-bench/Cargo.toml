@@ -1,0 +1,29 @@
+[package]
+name = "mneme-bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "mneme-bench"
+path = "src/main.rs"
+
+[dependencies]
+mneme-core.workspace = true
+mneme-procedural.workspace = true
+mneme-llm = { workspace = true, default-features = false }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+
+[features]
+default = []
+# Enable to swap in the real `OllamaLlmClient` as both the reflector
+# LLM and the executor LLM. Off by default — the demo path uses a
+# content-derived stub so the benchmark runs offline.
+ollama = ["mneme-llm/ollama"]
