@@ -70,6 +70,9 @@ pub struct AppState {
     /// dashboard handler can still query it (for active artifact
     /// counts) even when the worker isn't running.
     pub procedural_store: Arc<ProceduralStore>,
+    /// Phase-7 ingestion worker (extract + consolidate raw observations).
+    /// `None` when disabled; `/api/ingest/metrics` reports `enabled=false`.
+    pub ingestion: Option<Arc<crate::ingestion_worker::IngestionWorker>>,
     /// Tenant the viz operates in. The demo writer uses "demo"; production
     /// will plumb this from auth.
     pub default_tenant: String,
@@ -710,6 +713,56 @@ pub async fn evolve_metrics(State(state): State<Arc<AppState>>) -> Response {
         worker_state,
     };
     no_cache(Json(payload).into_response())
+}
+
+/// `GET /api/ingest/metrics` — Phase-7 ingestion telemetry (extract +
+/// consolidate). Reports `enabled=false` when the worker isn't running.
+pub async fn ingest_metrics(State(state): State<Arc<AppState>>) -> Response {
+    let payload = match &state.ingestion {
+        Some(w) => {
+            let m = w.metrics().await;
+            IngestMetricsResponse {
+                enabled: true,
+                backend: llm_backend_label(),
+                observations: m.observations,
+                facts_extracted: m.facts_extracted,
+                adds_committed: m.adds_committed,
+                adds_rejected: m.adds_rejected,
+                updates: m.updates,
+                contradictions: m.contradictions,
+                refinements: m.refinements,
+                noops: m.noops,
+            }
+        }
+        None => IngestMetricsResponse {
+            enabled: false,
+            backend: llm_backend_label(),
+            ..Default::default()
+        },
+    };
+    no_cache(Json(payload).into_response())
+}
+
+#[derive(Serialize, Default)]
+pub struct IngestMetricsResponse {
+    pub enabled: bool,
+    pub backend: &'static str,
+    /// Raw observations processed.
+    pub observations: u64,
+    /// Atomic facts extracted across all observations.
+    pub facts_extracted: u64,
+    /// Facts committed as new memories (ADD, post-admission).
+    pub adds_committed: u64,
+    /// ADDs culled by the importance-admission floor.
+    pub adds_rejected: u64,
+    /// Facts that superseded an existing memory (UPDATE).
+    pub updates: u64,
+    /// UPDATEs that were factual contradictions.
+    pub contradictions: u64,
+    /// UPDATEs that were refinements.
+    pub refinements: u64,
+    /// Facts dropped as duplicates (NOOP).
+    pub noops: u64,
 }
 
 #[derive(Serialize, Default)]
@@ -1635,6 +1688,7 @@ fn event_kind(e: &Event) -> &'static str {
         Event::MemoryLinksUpdated { .. } => "MemoryLinksUpdated",
         Event::MemoryEvolved { .. } => "MemoryEvolved",
         Event::MemoryInvalidated { .. } => "MemoryInvalidated",
+        Event::ObservationRecorded { .. } => "ObservationRecorded",
         Event::SourceIngested(_) => "SourceIngested",
         Event::SourceInvalidated { .. } => "SourceInvalidated",
         Event::OutcomeRecorded(_) => "OutcomeRecorded",
@@ -1686,6 +1740,13 @@ fn describe_event(e: &Event) -> String {
         }
         Event::MemoryInvalidated { id, reason } => {
             format!("invalidated …{} — {reason}", short(*id))
+        }
+        Event::ObservationRecorded { content, actor, .. } => {
+            let snippet: String = content.chars().take(48).collect();
+            match actor {
+                Some(a) => format!("observed [{a}] «{snippet}»"),
+                None => format!("observed «{snippet}»"),
+            }
         }
         Event::SourceIngested(s) => {
             let title: String = s.title.chars().take(48).collect();

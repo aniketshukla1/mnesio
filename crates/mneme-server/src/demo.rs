@@ -317,7 +317,38 @@ async fn run(
     )
     .await?;
 
+    // --- Phase 7: raw observations for the ingestion worker ---
+    // These are *un-consolidated* turns. The ingestion worker extracts a
+    // fact from each and decides ADD / NOOP(duplicate) / UPDATE
+    // (contradiction), which the dashboard's Phase-7 panel surfaces live.
+    tokio::time::sleep(Duration::from_millis(1_200)).await;
+    stream_observations(log.as_ref(), &scope).await?;
+
     tracing::info!(seeds = CORPUS.len(), evolutions = 2, "demo writer finished");
+    Ok(())
+}
+
+/// Append three raw observations that exercise the ingestion pipeline:
+/// a fresh fact (ADD), a verbatim repeat (NOOP/duplicate), and a
+/// correction (UPDATE/contradiction).
+async fn stream_observations(log: &dyn EventLog, scope: &Scope) -> anyhow::Result<()> {
+    let turns = [
+        "Priya was promoted to Staff Engineer in March.",
+        "Priya was promoted to Staff Engineer in March.",
+        "Actually Priya was promoted to Principal Engineer in March, not Staff.",
+    ];
+    for turn in turns {
+        log.append(Event::ObservationRecorded {
+            scope: scope.clone(),
+            content: turn.to_string(),
+            actor: Some("alice".into()),
+        })
+        .await?;
+        // Space them out so the ingestion worker processes each (and
+        // indexes the resulting memory) before the next arrives.
+        tokio::time::sleep(Duration::from_millis(900)).await;
+    }
+    tracing::info!("demo: streamed 3 raw observations for ingestion");
     Ok(())
 }
 

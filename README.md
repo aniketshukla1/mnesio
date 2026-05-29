@@ -6,7 +6,7 @@
     <a href="https://github.com/aniketshukla1/mneme/actions"><img alt="Build Status" src="https://img.shields.io/badge/build-passing-brightgreen"></a>
     <a href="https://crates.io/crates/mneme"><img alt="Version" src="https://img.shields.io/badge/version-v0.1.0-blue"></a>
     <a href="https://github.com/aniketshukla1/mneme/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
-    <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-339%20passing-brightgreen"></a>
+    <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-341%20passing-brightgreen"></a>
   </p>
 </div>
 
@@ -31,7 +31,7 @@ Two continuous loops operate over a single append-only event log:
 git clone https://github.com/aniketshukla1/mneme.git
 cd mneme
 
-# Run the workspace tests (339 passing)
+# Run the workspace tests (341 passing)
 cargo test --workspace
 
 # Boot the demo: live retrieval + memory evolution + procedural compiler
@@ -40,7 +40,7 @@ MNEME_DEMO=1 MNEME_PROCEDURAL=on cargo run -p mneme-server
 
 Then open:
 - **http://127.0.0.1:7777/** — live chat-style retrieval (hybrid vector + BM25 + extractive synthesis)
-- **http://127.0.0.1:7777/dashboard** — real-time benchmarks: latency, BM25 tier distribution, memory evolution chains, **procedural learning curve**, and a **bi-temporal knowledge-graph** panel (live neighborhood + lineage explorer, served by `/api/graph`)
+- **http://127.0.0.1:7777/dashboard** — real-time benchmarks: latency, BM25 tier distribution, memory evolution chains, **procedural learning curve**, an **ingestion-intelligence** panel (raw turns → ADD / UPDATE(contradiction) / NOOP, served by `/api/ingest/metrics`), and a **bi-temporal knowledge-graph** panel (`/api/graph`)
 
 In the demo, watch the **PROCEDURAL** section's learning curve climb from ~33% to 100% while the safety probe line stays glued at 100% — that's the Phase 2 "done when" criterion satisfied live.
 
@@ -339,12 +339,12 @@ mneme-procedural  : 102 unit + 5 integration tests
 mneme-bench       :   9 tests
 mneme-mcp         :  24 unit + 2 integration tests
 mneme-py          :   7 tests (Rust-side inner-client coverage)
-mneme-server      :  24 tests
+mneme-server      :  26 tests
 mneme-store       :   1 test
 mneme-graph       :  27 tests
 mneme-extract     :  33 tests
 ──────────────────────────────
-TOTAL             : 339 tests · all passing on both default and --no-default-features
+TOTAL             : 341 tests · all passing on both default and --no-default-features
 ```
 
 ---
@@ -378,7 +378,7 @@ References embedded in the code:
 
 ## ⚠️ Stability
 
-This is `0.1.0` — the first usable release. The system is end-to-end working with 339 passing tests across all six build phases, but the public API surface will still move as the graph store and procedural compiler gain real-world mileage. Pin a specific version in your `Cargo.toml`; expect breaking changes between `0.x.y` bumps.
+This is `0.1.0` — the first usable release. The system is end-to-end working with 341 passing tests across all six build phases, but the public API surface will still move as the graph store and procedural compiler gain real-world mileage. Pin a specific version in your `Cargo.toml`; expect breaking changes between `0.x.y` bumps.
 
 ---
 

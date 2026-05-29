@@ -57,6 +57,13 @@ impl LlmClient for DemoLlmClient {
             // evolved-memory chain in the dashboard without runaway.
             return Ok("TAGS_ADD: related\nKEYWORDS_ADD: linked".to_string());
         }
+        // Phase-7 ingestion prompts.
+        if prompt.starts_with("Extract the durable, atomic facts") {
+            return Ok(extract_response(prompt));
+        }
+        if prompt.starts_with("A new candidate fact has been extracted:") {
+            return Ok(decide_response(prompt));
+        }
         // Phase-2 procedural compiler prompts — reflection + proposal.
         // Returning real-looking but content-derived responses keeps the
         // dashboard's improvement curve moving without requiring Ollama.
@@ -152,6 +159,101 @@ fn proposal_response(prompt: &str) -> String {
     };
     let alt = format!("{body} Always provide a brief direct answer before any elaboration.");
     format!("--- CANDIDATE 1 ---\n{primary}\n--- CANDIDATE 2 ---\n{alt}")
+}
+
+/// Phase-7 extraction response. Splits the raw text into sentence-ish
+/// facts (one `FACT:` line each), dropping obvious filler. Deterministic
+/// + content-derived so the demo shows real extraction without a model.
+fn extract_response(prompt: &str) -> String {
+    let raw = prompt
+        .split_once("Text:\n")
+        .and_then(|(_, r)| r.split_once("\n\nRespond"))
+        .map(|(t, _)| t)
+        .unwrap_or("")
+        .trim();
+    let mut facts: Vec<String> = Vec::new();
+    for sentence in raw.split(['.', '\n']) {
+        let s = sentence.trim();
+        // Skip pleasantries / very short fragments (mirrors the prompt's
+        // "ignore transient chatter" instruction).
+        if s.len() < 8 || is_pleasantry(s) {
+            continue;
+        }
+        facts.push(format!("FACT: {s}"));
+    }
+    if facts.is_empty() {
+        return "NONE".to_string();
+    }
+    facts.join("\n")
+}
+
+/// Phase-7 consolidation decision. Heuristic over the embedded fact +
+/// candidate list:
+/// - correction markers ("not", "actually", "correction") + a candidate
+///   → `UPDATE 1 CONTRADICTION`;
+/// - high token overlap with candidate 1 → `NOOP 1` (duplicate);
+/// - otherwise `ADD`.
+fn decide_response(prompt: &str) -> String {
+    let fact = prompt
+        .split_once("A new candidate fact has been extracted:\n")
+        .and_then(|(_, r)| r.split_once('\n'))
+        .map(|(f, _)| f.trim())
+        .unwrap_or("");
+    if prompt.contains("There are no existing memories") {
+        return "DECISION: ADD".to_string();
+    }
+    // First candidate line looks like "1. <content>".
+    let cand1 = prompt
+        .split_once("Existing memories that may overlap:\n")
+        .and_then(|(_, r)| r.lines().next())
+        .map(|l| l.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ' '))
+        .unwrap_or("")
+        .trim();
+
+    let fl = fact.to_ascii_lowercase();
+    let is_correction = fl.contains(" not ")
+        || fl.starts_with("actually")
+        || fl.contains("correction")
+        || fl.contains("instead of");
+    if is_correction && !cand1.is_empty() {
+        return "DECISION: UPDATE 1 CONTRADICTION".to_string();
+    }
+    if !cand1.is_empty() && jaccard(fact, cand1) >= 0.6 {
+        return "DECISION: NOOP 1".to_string();
+    }
+    "DECISION: ADD".to_string()
+}
+
+fn is_pleasantry(s: &str) -> bool {
+    let l = s.to_ascii_lowercase();
+    matches!(
+        l.as_str(),
+        "hi" | "hello" | "hey" | "thanks" | "thank you" | "ok" | "okay" | "sure" | "got it"
+    ) || l.starts_with("thanks")
+        || l.starts_with("hello")
+}
+
+/// Token-set Jaccard overlap between two strings (lowercased, >2 chars).
+fn jaccard(a: &str, b: &str) -> f32 {
+    let ta = word_set(a);
+    let tb = word_set(b);
+    if ta.is_empty() || tb.is_empty() {
+        return 0.0;
+    }
+    let inter = ta.iter().filter(|w| tb.contains(*w)).count() as f32;
+    let union = ta.union(&tb).count() as f32;
+    if union > 0.0 {
+        inter / union
+    } else {
+        0.0
+    }
+}
+
+fn word_set(s: &str) -> std::collections::HashSet<String> {
+    s.split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() > 2)
+        .map(|t| t.to_ascii_lowercase())
+        .collect()
 }
 
 /// Extract the active system prompt's body from a proposal prompt. The

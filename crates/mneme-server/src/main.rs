@@ -24,6 +24,7 @@ mod demo_llm;
 mod demo_procedural;
 mod embedding_worker;
 mod graph_worker;
+mod ingestion_worker;
 mod metrics;
 mod viz;
 
@@ -152,6 +153,26 @@ async fn main() -> anyhow::Result<()> {
     // sync with the log as new events (demo writes, evolutions) land.
     graph_worker::spawn(log_trait.clone(), graph.clone());
 
+    // Phase 7 — ingestion worker. Tails ObservationRecorded events,
+    // extracts atomic facts, and consolidates each into ADD / UPDATE /
+    // NOOP (admission-gated). On by default in demo; off otherwise
+    // (opt in with MNEME_INGEST=on) since it's LLM-heavy per observation.
+    let ingestion_worker = if ingestion_enabled(demo_mode) {
+        let llm = build_llm_client()?;
+        tracing::info!(backend = llm_backend_name(), "ingestion worker: spawning");
+        let retriever_dyn: Arc<dyn Retriever> = retriever.clone();
+        Some(ingestion_worker::spawn(
+            log_trait.clone(),
+            retriever_dyn,
+            vector.clone(),
+            bm25.clone(),
+            llm,
+        ))
+    } else {
+        tracing::info!("ingestion worker: disabled (set MNEME_INGEST=on to enable)");
+        None
+    };
+
     if demo_mode {
         demo::spawn(log_trait.clone(), vector.clone(), bm25.clone());
     }
@@ -254,6 +275,7 @@ async fn main() -> anyhow::Result<()> {
         evolution: evolution_worker,
         procedural: procedural_worker,
         procedural_store,
+        ingestion: ingestion_worker,
         default_tenant: DEMO_TENANT.into(),
     });
     let app = Router::new()
@@ -265,6 +287,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/metrics/history", get(viz::metrics_history))
         .route("/api/evolve/metrics", get(viz::evolve_metrics))
         .route("/api/procedural/metrics", get(viz::procedural_metrics))
+        .route("/api/ingest/metrics", get(viz::ingest_metrics))
         .route("/api/graph", get(viz::graph))
         .route("/static/chart.umd.min.js", get(viz::chart_js))
         .with_state(state);
@@ -323,6 +346,19 @@ fn procedural_enabled() -> bool {
             matches!(v.as_str(), "on" | "1" | "true" | "yes")
         }
         Err(_) => false,
+    }
+}
+
+/// Should the ingestion worker spawn? On by default in demo mode so the
+/// dashboard's Phase-7 panel populates; off otherwise unless
+/// `MNEME_INGEST` is `on`/`1`/`true` (it's an LLM call per observation).
+fn ingestion_enabled(demo_mode: bool) -> bool {
+    match std::env::var("MNEME_INGEST") {
+        Ok(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            matches!(v.as_str(), "on" | "1" | "true" | "yes")
+        }
+        Err(_) => demo_mode,
     }
 }
 

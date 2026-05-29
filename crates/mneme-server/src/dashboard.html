@@ -431,6 +431,38 @@
       </div>
     </div>
 
+    <!-- Phase 7 — ingestion intelligence -->
+    <div class="section">
+      <h2>
+        <span class="col-tag">PHASE 7</span>
+        ingestion intelligence
+        <span class="hint">extract atomic facts → ADD / UPDATE(contradiction) / NOOP(dedup)</span>
+        <span id="ingest-state-pill" class="pill off">offline</span>
+      </h2>
+      <div class="kpi-row" style="margin-bottom: 0;">
+        <div class="kpi">
+          <div class="label">observations</div>
+          <div class="value"><span id="ingest-obs">—</span></div>
+          <div class="sub"><span id="ingest-facts">0</span> fact(s) extracted</div>
+        </div>
+        <div class="kpi">
+          <div class="label">added</div>
+          <div class="value"><span id="ingest-adds">—</span></div>
+          <div class="sub"><span id="ingest-rejected">0</span> rejected by admission</div>
+        </div>
+        <div class="kpi">
+          <div class="label">updated</div>
+          <div class="value"><span id="ingest-updates">—</span></div>
+          <div class="sub"><span id="ingest-contradictions">0</span> contradiction(s) · <span id="ingest-refinements">0</span> refinement(s)</div>
+        </div>
+        <div class="kpi">
+          <div class="label">deduped</div>
+          <div class="value"><span id="ingest-noops">—</span></div>
+          <div class="sub">NOOP — already known</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Phase 4 — bi-temporal knowledge graph -->
     <div class="section">
       <h2>
@@ -1031,13 +1063,36 @@
       loadGraph();
     });
 
+    async function refreshIngest() {
+      try {
+        const r = await fetch('/api/ingest/metrics');
+        if (!r.ok) return;
+        const m = await r.json();
+        const pill = document.getElementById('ingest-state-pill');
+        if (m.enabled) { pill.textContent = `${m.backend}`; pill.className = 'pill on'; }
+        else { pill.textContent = 'offline'; pill.className = 'pill off'; }
+        document.getElementById('ingest-obs').textContent = m.observations ?? 0;
+        document.getElementById('ingest-facts').textContent = m.facts_extracted ?? 0;
+        document.getElementById('ingest-adds').textContent = m.adds_committed ?? 0;
+        document.getElementById('ingest-rejected').textContent = m.adds_rejected ?? 0;
+        document.getElementById('ingest-updates').textContent = m.updates ?? 0;
+        document.getElementById('ingest-contradictions').textContent = m.contradictions ?? 0;
+        document.getElementById('ingest-refinements').textContent = m.refinements ?? 0;
+        document.getElementById('ingest-noops').textContent = m.noops ?? 0;
+      } catch (err) {
+        console.warn('ingest metrics fetch failed', err);
+      }
+    }
+
     refresh();
     refreshEvolve();
     refreshProcedural();
+    refreshIngest();
     loadGraph();
     setInterval(refresh, 3000);
     setInterval(refreshEvolve, 3000);
     setInterval(refreshProcedural, 3000);
+    setInterval(refreshIngest, 3000);
     setInterval(loadGraph, 3000);
   </script>
 </body>

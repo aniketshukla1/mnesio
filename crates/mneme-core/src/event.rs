@@ -59,6 +59,21 @@ pub enum Event {
         reason: String,
     },
 
+    /// A raw, un-consolidated observation (a conversational turn, a note,
+    /// a tool trace) entering the system. Appended fast on the write path
+    /// (Hard Rule #5); the async **ingestion worker** (`mneme-extract`)
+    /// tails these, extracts atomic facts, and consolidates each into
+    /// `MemoryWritten` (ADD), a supersede triple (UPDATE), or nothing
+    /// (NOOP / below the admission floor). Keeping the raw turn in the log
+    /// means the consolidation is fully replayable + auditable.
+    ObservationRecorded {
+        scope: Scope,
+        content: String,
+        /// Which actor/agent produced this (multi-agent attribution).
+        /// `None` for single-agent / anonymous input.
+        actor: Option<String>,
+    },
+
     /// A new source document was ingested. The chunks themselves arrive as
     /// separate `MemoryWritten` events with their `source` field pointing
     /// at this source's id.
