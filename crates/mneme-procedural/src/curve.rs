@@ -19,11 +19,12 @@
 //! 3. runs the [`crate::eval::EvalSuite`] against it
 //! 4. records a [`LearningCurvePoint`] here
 //!
-//! Replay-from-log isn't supported (yet) because the eval scores
-//! aren't stored on the wire — they're computed live. A future slice
-//! might add a `LearningCurvePoint` event type so points survive
-//! restarts; for now the collector is in-memory and lossy on restart,
-//! which is fine for the dashboard.
+//! Replay-from-log IS supported as of Slice E: every recorded point
+//! is also emitted as a [`mneme_core::event::Event::LearningCurveRecorded`]
+//! event, so the collector can rebuild its history exactly by replaying
+//! the log. Restart-survives — a safety-probe regression that happened
+//! a week ago is still in the curve. The in-memory cache stays as a
+//! cheap accessor for the dashboard; the log is the truth.
 //!
 //! ## Concurrency
 //!
@@ -31,7 +32,9 @@
 //! [`crate::ProceduralStore`]. The worker is the only thing that
 //! mutates; many dashboard readers can pull `points()` concurrently.
 
+use mneme_core::event::{Event, LogEntry};
 use mneme_core::types::ArtifactRef;
+use mneme_core::{EventLog, MnemeError};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -75,6 +78,45 @@ impl LearningCurveCollector {
     /// chronologically.
     pub async fn record(&self, point: LearningCurvePoint) {
         self.inner.write().await.push(point);
+    }
+
+    /// Replay the entire log to rebuild the curve. Idempotent — a
+    /// second `replay` against the same log will append the same
+    /// points again, which is intentional: the in-memory state is
+    /// derived, the log is the truth. Callers that want a clean
+    /// rebuild should construct a fresh `LearningCurveCollector`.
+    pub async fn replay(&self, log: &dyn EventLog) -> Result<(), MnemeError> {
+        let entries = log.read_from(None).await?;
+        for entry in &entries {
+            self.absorb(entry).await;
+        }
+        Ok(())
+    }
+
+    /// Update the collector from a single log entry. Public so the
+    /// worker can drive it directly during the tail loop. Non-curve
+    /// events are no-ops.
+    pub async fn absorb(&self, entry: &LogEntry) {
+        if let Event::LearningCurveRecorded {
+            artifact,
+            version,
+            benchmark_score,
+            safety_probe_pass_rate,
+            objective_delta,
+            judges_consulted,
+        } = &entry.event
+        {
+            self.record(LearningCurvePoint {
+                artifact_id: *artifact,
+                version: *version,
+                timestamp_ms: entry.id.timestamp_ms(),
+                benchmark_score: *benchmark_score,
+                safety_probe_pass_rate: *safety_probe_pass_rate,
+                objective_delta: *objective_delta,
+                judges_consulted: *judges_consulted,
+            })
+            .await;
+        }
     }
 
     /// Snapshot of every recorded point in arrival order.
@@ -220,5 +262,93 @@ mod tests {
         assert!(c.is_empty().await);
         assert!(c.safety_clean().await);
         assert!(c.strictly_non_decreasing(ArtifactRef(new_id())).await);
+    }
+
+    // ---- replay-from-log ----
+
+    use mneme_core::event::LogEntry;
+    use mneme_core::types::Id;
+    use std::sync::Mutex;
+
+    /// Minimal in-process log so the replay test stays
+    /// dependency-free.
+    struct MemoryLog {
+        entries: Mutex<Vec<LogEntry>>,
+    }
+
+    #[async_trait::async_trait]
+    impl mneme_core::EventLog for MemoryLog {
+        async fn append(
+            &self,
+            event: mneme_core::event::Event,
+        ) -> Result<Id, mneme_core::MnemeError> {
+            let id = new_id();
+            self.entries.lock().unwrap().push(LogEntry { id, event });
+            Ok(id)
+        }
+
+        async fn read_from(
+            &self,
+            after: Option<Id>,
+        ) -> Result<Vec<LogEntry>, mneme_core::MnemeError> {
+            let g = self.entries.lock().unwrap();
+            Ok(match after {
+                None => g.clone(),
+                Some(id) => g.iter().filter(|e| e.id > id).cloned().collect(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn replay_rebuilds_curve_from_log_events() {
+        let log = MemoryLog {
+            entries: Mutex::new(Vec::new()),
+        };
+        let aref = ArtifactRef(new_id());
+
+        // Append three curve events directly to the log (no worker
+        // involved — this isolates the replay logic).
+        for v in 1..=3 {
+            log.append(mneme_core::event::Event::LearningCurveRecorded {
+                artifact: aref,
+                version: v,
+                benchmark_score: v as f32 / 3.0,
+                safety_probe_pass_rate: 1.0,
+                objective_delta: 0.0,
+                judges_consulted: 2,
+            })
+            .await
+            .unwrap();
+        }
+
+        // Fresh collector + replay → curve should be exactly what we
+        // appended, in the right order.
+        let c = LearningCurveCollector::new();
+        c.replay(&log).await.unwrap();
+        let pts = c.points().await;
+        assert_eq!(pts.len(), 3);
+        assert_eq!(pts[0].version, 1);
+        assert_eq!(pts[2].version, 3);
+        assert!((pts[2].benchmark_score - 1.0).abs() < 1e-6);
+        assert!(c.safety_clean().await);
+        assert!(c.strictly_non_decreasing(aref).await);
+    }
+
+    #[tokio::test]
+    async fn replay_ignores_non_curve_events() {
+        // Throw an unrelated event at the log and confirm replay
+        // doesn't add anything.
+        let log = MemoryLog {
+            entries: Mutex::new(Vec::new()),
+        };
+        log.append(mneme_core::event::Event::MemoryInvalidated {
+            id: mneme_core::types::MemoryRef(new_id()),
+            reason: "unrelated".into(),
+        })
+        .await
+        .unwrap();
+        let c = LearningCurveCollector::new();
+        c.replay(&log).await.unwrap();
+        assert!(c.is_empty().await);
     }
 }

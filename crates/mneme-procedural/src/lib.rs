@@ -195,19 +195,23 @@ impl ProceduralCompiler {
 
         // ---- shadow-eval every candidate, gate every report ----
         let mut outcomes_vec: Vec<CandidateOutcome> = Vec::with_capacity(proposal.candidates.len());
-        let mut winner_idx: Option<usize> = None;
-        for (i, candidate) in proposal.candidates.iter().enumerate() {
+        for candidate in &proposal.candidates {
             let report = self.shadow.evaluate(candidate, shadow_inputs).await?;
             let verdict = self.gates.evaluate(&report);
-            if verdict.committable && winner_idx.is_none() {
-                winner_idx = Some(i);
-            }
             outcomes_vec.push(CandidateOutcome {
                 candidate: candidate.clone(),
                 report,
                 verdict,
             });
         }
+
+        // ---- Pareto selection ----
+        // Across the committable subset, pick the lexicographic winner
+        // on (objective_delta, replay_success_rate). Both objectives
+        // are higher-is-better. Deterministic tie-break: identical
+        // (Δ, replay) pairs → lower index wins. This is the "P" in
+        // GEPA — propose K, pick the Pareto-best.
+        let winner_idx = pareto_winner_idx(&outcomes_vec);
 
         Ok(Some(CompileResult {
             proposal,
@@ -296,6 +300,47 @@ enum ApplyDecision {
     Reject(String),
 }
 
+/// Pareto-front winner selection across the committable subset of a
+/// `CompileResult`'s candidate outcomes. Uses lexicographic ordering
+/// on `(objective_delta, replay_success_rate)` — both higher-is-better
+/// — for a deterministic, easy-to-explain tie-break across the front.
+///
+/// Why lexicographic and not weighted sum? The compiler is trying to
+/// improve the headline objective; replay is a tail-protection tie-
+/// breaker, not a weighted partner. Weighted sums hide the operator
+/// preference inside a coefficient; lex ordering surfaces it.
+///
+/// Why not dominance-only? In the rare case multiple candidates are
+/// mutually non-dominated AND tied on the lex order (same Δ, same
+/// replay), we want a single deterministic answer. Lex selects the
+/// lowest index, matching GEPA's "propose K, pick one" contract.
+///
+/// Returns `None` if no candidate is committable.
+fn pareto_winner_idx(outcomes: &[CandidateOutcome]) -> Option<usize> {
+    outcomes
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| o.verdict.committable)
+        .max_by(|(a_i, a), (b_i, b)| {
+            // Higher objective_delta wins; ties go to higher
+            // replay_success_rate; further ties go to lower index
+            // (i.e. earlier-proposed candidate, since we reverse the
+            // index comparison so `max_by` picks the smaller index).
+            a.report
+                .objective_delta
+                .partial_cmp(&b.report.objective_delta)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    a.report
+                        .replay_success_rate
+                        .partial_cmp(&b.report.replay_success_rate)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| b_i.cmp(a_i))
+        })
+        .map(|(i, _)| i)
+}
+
 /// Format the per-candidate rejection reasons into a single line for
 /// the `ProceduralRejected.reason` field. The structured `Verdict`
 /// objects don't go on the wire individually — the dashboard re-derives
@@ -323,4 +368,93 @@ fn render_rejection_reasons(outcomes: &[CandidateOutcome]) -> String {
         parts.push(format!("c{i}=[{}]", names.join(",")));
     }
     parts.join(" ")
+}
+
+#[cfg(test)]
+mod pareto_tests {
+    use super::*;
+    use mneme_core::entity::{ArtifactKind, PolicyArtifact};
+    use mneme_core::event::EvalReport;
+    use mneme_core::types::{new_id, BiTemporal, Scope};
+
+    fn artifact() -> PolicyArtifact {
+        PolicyArtifact {
+            id: new_id(),
+            version: 1,
+            scope: Scope::global("t"),
+            kind: ArtifactKind::SystemPrompt { body: "x".into() },
+            canaries: vec![],
+            time: BiTemporal::now(),
+        }
+    }
+
+    fn outcome(committable: bool, delta: f32, replay: f32) -> CandidateOutcome {
+        CandidateOutcome {
+            candidate: artifact(),
+            report: EvalReport {
+                canaries_passed: 0,
+                canaries_total: 0,
+                replay_success_rate: replay,
+                safety_probe_passed: true,
+                objective_delta: delta,
+                judges_consulted: 2,
+            },
+            verdict: Verdict {
+                committable,
+                reasons: vec![],
+            },
+        }
+    }
+
+    #[test]
+    fn picks_highest_objective_delta() {
+        let outcomes = vec![
+            outcome(true, 0.1, 1.0),
+            outcome(true, 0.3, 1.0),
+            outcome(true, 0.2, 1.0),
+        ];
+        assert_eq!(pareto_winner_idx(&outcomes), Some(1));
+    }
+
+    #[test]
+    fn breaks_delta_tie_with_replay_success_rate() {
+        let outcomes = vec![
+            outcome(true, 0.2, 0.96),
+            outcome(true, 0.2, 0.99), // same Δ, higher replay → wins
+            outcome(true, 0.2, 0.97),
+        ];
+        assert_eq!(pareto_winner_idx(&outcomes), Some(1));
+    }
+
+    #[test]
+    fn breaks_full_tie_with_lower_index() {
+        let outcomes = vec![
+            outcome(true, 0.2, 0.99),
+            outcome(true, 0.2, 0.99), // identical → earlier index wins
+            outcome(true, 0.2, 0.99),
+        ];
+        assert_eq!(pareto_winner_idx(&outcomes), Some(0));
+    }
+
+    #[test]
+    fn skips_non_committable_even_with_better_scores() {
+        // Highest Δ but verdict.committable=false → cannot win.
+        let outcomes = vec![
+            outcome(false, 0.9, 1.0),
+            outcome(true, 0.1, 0.98),
+            outcome(true, 0.2, 0.97),
+        ];
+        assert_eq!(pareto_winner_idx(&outcomes), Some(2));
+    }
+
+    #[test]
+    fn none_when_no_committable_candidates() {
+        let outcomes = vec![outcome(false, 0.5, 1.0), outcome(false, 0.3, 1.0)];
+        assert!(pareto_winner_idx(&outcomes).is_none());
+    }
+
+    #[test]
+    fn empty_outcomes_is_none() {
+        assert!(pareto_winner_idx(&[]).is_none());
+    }
 }

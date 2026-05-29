@@ -84,6 +84,32 @@ pub enum Event {
         proposal: ProposalId,
         reason: String,
     },
+
+    /// Snapshot of an evaluation-suite run against a committed artifact
+    /// version. Emitted by the procedural worker after every successful
+    /// commit, with optional baseline-seed points emitted at boot for
+    /// version=1 artifacts that don't yet have a measurement.
+    ///
+    /// Treating curve points as log events (rather than ephemeral
+    /// telemetry) is what makes Phase-2 "done when" claims auditable:
+    /// the learning curve can be replayed exactly from the log, and a
+    /// safety-probe regression is preserved as a permanent record
+    /// rather than evaporating on process restart.
+    LearningCurveRecorded {
+        artifact: ArtifactRef,
+        version: u32,
+        /// Absolute suite score `[0.0, 1.0]`.
+        benchmark_score: f32,
+        /// Safety probe pass rate `[0.0, 1.0]`. Any value < 1.0 is the
+        /// alignment-drift signal (report §10).
+        safety_probe_pass_rate: f32,
+        /// Gate's per-commit objective Δ — joined here so the curve
+        /// can be plotted alongside the gate's relative signal.
+        objective_delta: f32,
+        /// Distinct judges that scored this version (diversity gate
+        /// compliance).
+        judges_consulted: u8,
+    },
 }
 
 /// A structural diff produced by the evolution worker.

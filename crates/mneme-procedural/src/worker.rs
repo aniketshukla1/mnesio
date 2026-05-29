@@ -20,7 +20,7 @@
 //!   `ShadowInputs`; the worker forwards a fixed set provided at
 //!   construction time)
 
-use crate::curve::{LearningCurveCollector, LearningCurvePoint};
+use crate::curve::LearningCurveCollector;
 use crate::eval::EvalSuite;
 use crate::executor::PolicyExecutor;
 use crate::store::ProceduralStore;
@@ -129,25 +129,70 @@ impl ProceduralWorker {
             self.absorb(entry).await;
         }
         if let Some(eval) = &self.eval {
+            // Rebuild the in-memory curve from the log first — events
+            // are the source of truth (Rule #4). If any LearningCurveRecorded
+            // events exist for active artifacts, they populate the
+            // collector here.
+            eval.collector.replay(self.log.as_ref()).await?;
+            // If the curve is *still* empty for an active artifact,
+            // seed a baseline measurement by running the suite once.
+            // This handles the bootstrap case where the artifact was
+            // seeded but never measured.
             if eval.collector.is_empty().await {
                 for active in self.store.all().await {
                     let aref = ArtifactRef(active.id);
                     if let Ok(report) = eval.suite.run(&active, eval.executor.clone()).await {
-                        let point = LearningCurvePoint {
-                            artifact_id: aref,
-                            version: active.version,
-                            timestamp_ms: now_ms(),
-                            benchmark_score: report.benchmark_score,
-                            safety_probe_pass_rate: report.safety_probe_pass_rate,
-                            objective_delta: 0.0,
-                            judges_consulted: 0,
-                        };
-                        eval.collector.record(point).await;
+                        self.emit_and_absorb_curve_point(
+                            eval,
+                            aref,
+                            active.version,
+                            &report,
+                            0.0, // no Δ — this is the initial baseline
+                            0,   // no judges signed off — this is a measurement, not a commit
+                        )
+                        .await;
                     }
                 }
             }
         }
         Ok(last)
+    }
+
+    /// Append a `LearningCurveRecorded` event to the log, then absorb
+    /// it into the collector. Order matters: the event is the source
+    /// of truth; in-memory state derives from it. If the append fails,
+    /// the in-memory cache stays untouched and the next `replay` will
+    /// reconcile.
+    async fn emit_and_absorb_curve_point(
+        &self,
+        eval: &EvalBinding,
+        artifact: ArtifactRef,
+        version: u32,
+        report: &crate::eval::SuiteReport,
+        objective_delta: f32,
+        judges_consulted: u8,
+    ) {
+        let event = Event::LearningCurveRecorded {
+            artifact,
+            version,
+            benchmark_score: report.benchmark_score,
+            safety_probe_pass_rate: report.safety_probe_pass_rate,
+            objective_delta,
+            judges_consulted,
+        };
+        match self.log.append(event.clone()).await {
+            Ok(id) => {
+                eval.collector.absorb(&LogEntry { id, event }).await;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    artifact = %artifact.0,
+                    version,
+                    error = %e,
+                    "curve event append failed; in-memory cache will reconcile on next replay"
+                );
+            }
+        }
     }
 
     /// Update internal caches + the store from a single log entry.
@@ -284,16 +329,15 @@ impl ProceduralWorker {
                         let target = self.store.get(aref).await.unwrap_or(winning_candidate);
                         match eval.suite.run(&target, eval.executor.clone()).await {
                             Ok(suite_report) => {
-                                let point = LearningCurvePoint {
-                                    artifact_id: aref,
-                                    version: target.version,
-                                    timestamp_ms: now_ms,
-                                    benchmark_score: suite_report.benchmark_score,
-                                    safety_probe_pass_rate: suite_report.safety_probe_pass_rate,
-                                    objective_delta: report.objective_delta,
-                                    judges_consulted: report.judges_consulted,
-                                };
-                                eval.collector.record(point).await;
+                                self.emit_and_absorb_curve_point(
+                                    eval,
+                                    aref,
+                                    target.version,
+                                    &suite_report,
+                                    report.objective_delta,
+                                    report.judges_consulted,
+                                )
+                                .await;
                                 if !suite_report.safety_clean() {
                                     // Alignment-drift indicator (report
                                     // §10). Loud warning so the operator
