@@ -13,6 +13,7 @@
 pub mod bm25;
 pub mod chunker;
 pub mod embedder;
+pub mod partitioned_vector;
 pub mod synthesizer;
 pub mod vector;
 
@@ -21,6 +22,7 @@ pub use chunker::{Chunker, ParagraphChunker};
 #[cfg(feature = "fastembed")]
 pub use embedder::FastEmbedEmbedder;
 pub use embedder::MockEmbedder;
+pub use partitioned_vector::{TenantPartitionedVectorView, TenantStats};
 pub use synthesizer::SnippetSynthesizer;
 pub use vector::VectorView;
 

@@ -124,8 +124,25 @@ impl VectorView {
     /// k-nearest neighbors, post-filtered by scope and tombstones.
     ///
     /// Returns [`Hit`]s with an explainable single-signal breakdown. The
-    /// hybrid retriever fuses this with BM25 (next slice) into the final
-    /// caller-facing score.
+    /// hybrid retriever fuses this with BM25 into the final caller-facing
+    /// score.
+    ///
+    /// ## Adaptive over-fetch (Phase 3)
+    ///
+    /// Selective scopes — `tenant=A` against an index where most memories
+    /// are `tenant=B` — used to under-return because the first HNSW pull
+    /// of `K*4` was mostly filtered out. The search now loops, doubling
+    /// `over_k` until either:
+    ///
+    /// - it has `k` post-filter hits to return, or
+    /// - it has exhausted the index (`over_k >= total_slots`).
+    ///
+    /// This trades a few extra HNSW traversals for correctness on
+    /// selective filters; tightly-matched filters still get the cheap
+    /// single-pass result they always did. True ACORN-style traversal-
+    /// filtering (where mismatched nodes don't count toward `ef_search`
+    /// but ARE used as hops) is a future internal-only optimization on
+    /// top of `hnsw_rs` — the public contract here doesn't change.
     pub fn search(&self, query: &[f32], k: usize, scope: &Scope) -> Result<Vec<Hit>, MnemeError> {
         if query.len() != self.dim {
             return Err(MnemeError::Index(format!(
@@ -137,12 +154,47 @@ impl VectorView {
         if k == 0 {
             return Ok(Vec::new());
         }
-        // Over-fetch then post-filter. The 4x multiplier is a Phase 0 guess;
-        // selective scopes need more headroom, which Phase 3's native filter
-        // makes irrelevant.
-        let over_k = k.saturating_mul(4).max(16);
-        let ef_search = over_k.max(50);
-        let neighbours = self.index.read().unwrap().search(query, over_k, ef_search);
+
+        let total_slots = self.slots.read().unwrap().len();
+        if total_slots == 0 {
+            return Ok(Vec::new());
+        }
+
+        // Cap on how many adaptive doublings we'll do. Each iteration is
+        // O(ef_search log N); 5 doublings of K*4 covers everything from
+        // perfectly-dense filters (one pass) to one-in-a-million scopes
+        // on a 100k-slot index.
+        const MAX_ADAPTIVE_ATTEMPTS: usize = 5;
+
+        let mut over_k = k.saturating_mul(4).max(16);
+        let mut hits: Vec<Hit> = Vec::with_capacity(k);
+        for _ in 0..MAX_ADAPTIVE_ATTEMPTS {
+            // Don't ask hnsw_rs for more than it has.
+            let bounded_over_k = over_k.min(total_slots);
+            let ef_search = bounded_over_k.max(50);
+            let neighbours = self
+                .index
+                .read()
+                .unwrap()
+                .search(query, bounded_over_k, ef_search);
+            hits = self.collect_filtered_hits(&neighbours, scope, k);
+            if hits.len() >= k || bounded_over_k >= total_slots {
+                break;
+            }
+            over_k = over_k.saturating_mul(2);
+        }
+        Ok(hits)
+    }
+
+    /// Resolve raw HNSW neighbours against scope + tombstones into
+    /// caller-facing [`Hit`]s. Pulled out so the adaptive search loop
+    /// can reuse it across over-fetch attempts.
+    fn collect_filtered_hits(
+        &self,
+        neighbours: &[hnsw_rs::prelude::Neighbour],
+        scope: &Scope,
+        k: usize,
+    ) -> Vec<Hit> {
         let slots = self.slots.read().unwrap();
         let tombstones = self.tombstones.read().unwrap();
         let mut hits = Vec::with_capacity(k);
@@ -157,8 +209,6 @@ impl VectorView {
             if !scope.contains(&slot.scope) {
                 continue;
             }
-            // Convert L2 distance to a similarity (larger == better) so every
-            // Retriever caller can treat scores uniformly.
             let score = 1.0 / (1.0 + n.distance);
             hits.push(Hit {
                 memory: slot.memory,
@@ -169,7 +219,47 @@ impl VectorView {
                 break;
             }
         }
-        Ok(hits)
+        hits
+    }
+
+    // ----------------------------------------------------------------
+    // Observability (Phase 3) — small helpers the dashboard polls so
+    // operators know when to ask for a rebuild-from-log. All are O(1)
+    // reads behind the existing locks.
+    // ----------------------------------------------------------------
+
+    /// Total physical slots ever allocated in the index. Includes
+    /// tombstoned-but-not-reclaimed entries.
+    pub fn slot_count(&self) -> usize {
+        self.slots.read().unwrap().len()
+    }
+
+    /// Number of slots currently tombstoned (invalidated or superseded
+    /// by evolution). These still occupy HNSW graph capacity but never
+    /// surface in search results.
+    pub fn tombstone_count(&self) -> usize {
+        self.tombstones.read().unwrap().len()
+    }
+
+    /// Slots that can still surface in search. Equivalent to
+    /// `slot_count() - tombstone_count()`.
+    pub fn live_count(&self) -> usize {
+        let total = self.slot_count();
+        let dead = self.tombstone_count();
+        total.saturating_sub(dead)
+    }
+
+    /// Fraction of slots that are tombstoned, in `[0.0, 1.0]`. Dashboard
+    /// alarms typically trip around `0.3`–`0.5`: past that point the
+    /// index's effective fill factor has dropped enough that a rebuild
+    /// from the log would shrink the working set + speed up traversal.
+    /// Returns `0.0` for an empty index.
+    pub fn tombstone_ratio(&self) -> f32 {
+        let total = self.slot_count();
+        if total == 0 {
+            return 0.0;
+        }
+        self.tombstone_count() as f32 / total as f32
     }
 }
 
@@ -555,5 +645,94 @@ mod tests {
         view.apply(&e).await.unwrap();
 
         assert_eq!(view.checkpoint().await.unwrap(), Some(id));
+    }
+
+    // ---- Phase 3: adaptive over-fetch + observability ----
+
+    #[tokio::test]
+    async fn adaptive_over_fetch_returns_full_k_under_selective_scope() {
+        // A scope-selective query: 20 "noise" memories under one
+        // tenant, 5 target memories under another. Even though the
+        // first K*4 HNSW pull may be mostly noise, the adaptive loop
+        // doubles `over_k` until 5 in-scope hits are found.
+        //
+        // Target vectors are slightly jittered so HNSW's graph
+        // construction doesn't collapse them onto a single node — that
+        // collapse is a property of the approximate index, not of the
+        // adaptive filter logic we want to verify here.
+        let view = VectorView::new(4, "test-v1");
+        let scope_noise = Scope::global("noise");
+        let scope_target = Scope::global("target");
+        add_filler(&view, &scope_noise, 20).await;
+
+        for i in 0..5 {
+            let jitter = i as f32 * 0.0005;
+            let m = mem_with(
+                "target",
+                scope_target.clone(),
+                vec![1.0 - jitter, jitter, 0.0, 0.0],
+            );
+            view.apply(&entry(Event::MemoryWritten(m))).await.unwrap();
+        }
+
+        let hits = view
+            .search(&[1.0, 0.0, 0.0, 0.0], 5, &scope_target)
+            .unwrap();
+        assert_eq!(
+            hits.len(),
+            5,
+            "adaptive over-fetch must keep doubling until K in-scope hits found; got {}",
+            hits.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn adaptive_search_bounded_by_index_size_no_infinite_loop() {
+        // The adaptive loop must cap `over_k` at total_slots so a
+        // small index doesn't spin forever doubling.
+        let view = VectorView::new(4, "test-v1");
+        let scope = Scope::global("only");
+        for _ in 0..3 {
+            let m = mem_with("x", scope.clone(), vec![1.0, 0.0, 0.0, 0.0]);
+            view.apply(&entry(Event::MemoryWritten(m))).await.unwrap();
+        }
+        // Ask for 100; only 3 exist. Should return 3 without hanging.
+        let hits = view.search(&[1.0, 0.0, 0.0, 0.0], 100, &scope).unwrap();
+        assert_eq!(hits.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn tombstone_observability_reflects_invalidations() {
+        let view = VectorView::new(4, "test-v1");
+        let scope = Scope::global("test");
+
+        let m1 = mem_with("a", scope.clone(), vec![1.0, 0.0, 0.0, 0.0]);
+        let m2 = mem_with("b", scope.clone(), vec![0.0, 1.0, 0.0, 0.0]);
+        let m1_ref = MemoryRef(m1.id);
+        view.apply(&entry(Event::MemoryWritten(m1))).await.unwrap();
+        view.apply(&entry(Event::MemoryWritten(m2))).await.unwrap();
+        assert_eq!(view.slot_count(), 2);
+        assert_eq!(view.tombstone_count(), 0);
+        assert_eq!(view.live_count(), 2);
+        assert!(view.tombstone_ratio().abs() < 1e-6);
+
+        view.apply(&entry(Event::MemoryInvalidated {
+            id: m1_ref,
+            reason: "x".into(),
+        }))
+        .await
+        .unwrap();
+        assert_eq!(view.slot_count(), 2);
+        assert_eq!(view.tombstone_count(), 1);
+        assert_eq!(view.live_count(), 1);
+        assert!((view.tombstone_ratio() - 0.5).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn tombstone_ratio_on_empty_index_is_zero_not_nan() {
+        let view = VectorView::new(4, "test-v1");
+        assert_eq!(view.tombstone_ratio(), 0.0);
+        assert_eq!(view.slot_count(), 0);
+        assert_eq!(view.live_count(), 0);
     }
 }
