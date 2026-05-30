@@ -30,7 +30,7 @@ use mneme_core::{
 };
 use mneme_evolve::EvolutionWorker;
 use mneme_graph::{FjallGraphView, Relation};
-use mneme_index::{Bm25View, HybridRetriever, ProfileView, VectorView};
+use mneme_index::{AgentAclView, Bm25View, HybridRetriever, ProfileView, VectorView};
 use mneme_procedural::{ProceduralStore, ProceduralWorker};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -1809,6 +1809,8 @@ fn event_kind(e: &Event) -> &'static str {
         Event::MemoryInvalidated { .. } => "MemoryInvalidated",
         Event::ObservationRecorded { .. } => "ObservationRecorded",
         Event::ProfileSet { .. } => "ProfileSet",
+        Event::AgentAccessGranted { .. } => "AgentAccessGranted",
+        Event::AgentAccessRevoked { .. } => "AgentAccessRevoked",
         Event::SourceIngested(_) => "SourceIngested",
         Event::SourceInvalidated { .. } => "SourceInvalidated",
         Event::OutcomeRecorded(_) => "OutcomeRecorded",
@@ -1876,6 +1878,12 @@ fn describe_event(e: &Event) -> String {
             } else {
                 format!("profile set · {attribute} = {value}")
             }
+        }
+        Event::AgentAccessGranted { owner, grantee, .. } => {
+            format!("acl grant · {grantee} may read {owner}")
+        }
+        Event::AgentAccessRevoked { owner, grantee, .. } => {
+            format!("acl revoke · {grantee} ✗ {owner}")
         }
         Event::SourceIngested(s) => {
             let title: String = s.title.chars().take(48).collect();

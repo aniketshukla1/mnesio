@@ -74,6 +74,23 @@ pub enum Event {
         actor: Option<String>,
     },
 
+    /// Grant agent `grantee` read access to memories owned by agent
+    /// `owner` within `tenant`. Multi-agent ACL layer (P1#7): a finer
+    /// boundary *inside* a `Scope`. An agent always reads its own
+    /// memories + system-owned ("shared") memories; reading another
+    /// agent's memories requires an explicit grant.
+    AgentAccessGranted {
+        tenant: String,
+        owner: String,
+        grantee: String,
+    },
+    /// Revoke a previously-granted cross-agent read.
+    AgentAccessRevoked {
+        tenant: String,
+        owner: String,
+        grantee: String,
+    },
+
     /// A new source document was ingested. The chunks themselves arrive as
     /// separate `MemoryWritten` events with their `source` field pointing
     /// at this source's id.

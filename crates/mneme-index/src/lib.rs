@@ -10,6 +10,7 @@
 //! are all in. Custom filtered HNSW (Phase 3) and persistent indexes are
 //! the next bumps.
 
+pub mod acl;
 pub mod bm25;
 pub mod chunker;
 pub mod embedder;
@@ -18,6 +19,7 @@ pub mod profile;
 pub mod synthesizer;
 pub mod vector;
 
+pub use acl::{AgentAclView, AgentAttribution};
 pub use bm25::{Bm25Tier, Bm25View};
 pub use chunker::{Chunker, ParagraphChunker};
 #[cfg(feature = "fastembed")]
