@@ -36,7 +36,8 @@ use mneme_core::{Embedder, EventLog, LlmClient, MnemeError, Retriever};
 use mneme_evolve::EvolveConfig;
 use mneme_graph::FjallGraphView;
 use mneme_index::{
-    Bm25View, FastEmbedEmbedder, HybridRetriever, MockEmbedder, SnippetSynthesizer, VectorView,
+    Bm25View, FastEmbedEmbedder, HybridRetriever, MockEmbedder, ProfileView, SnippetSynthesizer,
+    VectorView,
 };
 use mneme_store::FjallEventLog;
 use std::net::SocketAddr;
@@ -96,12 +97,16 @@ async fn main() -> anyhow::Result<()> {
         embedder.model_id().to_string(),
     ));
     let bm25 = Arc::new(Bm25View::new()?);
+    // Phase-8 (P1#6) — profile / persona memory. In-memory, rebuilt from
+    // the log's `ProfileSet` events each boot (Hard Rule #4).
+    let profile = Arc::new(ProfileView::new());
 
     // Replay the log into the views — "indexes rebuild from the log".
     let entry_count = entries.len();
     for entry in &entries {
         vector.apply(entry).await?;
         bm25.apply(entry).await?;
+        profile.apply(entry).await?;
     }
     tracing::info!(
         event_count = entry_count,
@@ -174,7 +179,12 @@ async fn main() -> anyhow::Result<()> {
     };
 
     if demo_mode {
-        demo::spawn(log_trait.clone(), vector.clone(), bm25.clone());
+        demo::spawn(
+            log_trait.clone(),
+            vector.clone(),
+            bm25.clone(),
+            profile.clone(),
+        );
     }
 
     // Phase 1 — memory evolution worker. Off-path from the write loop;
@@ -276,6 +286,7 @@ async fn main() -> anyhow::Result<()> {
         procedural: procedural_worker,
         procedural_store,
         ingestion: ingestion_worker,
+        profile,
         default_tenant: DEMO_TENANT.into(),
     });
     let app = Router::new()
@@ -288,6 +299,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/evolve/metrics", get(viz::evolve_metrics))
         .route("/api/procedural/metrics", get(viz::procedural_metrics))
         .route("/api/ingest/metrics", get(viz::ingest_metrics))
+        .route("/api/profile", get(viz::profile))
         .route("/api/graph", get(viz::graph))
         .route("/static/chart.umd.min.js", get(viz::chart_js))
         .with_state(state);

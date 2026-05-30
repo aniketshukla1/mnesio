@@ -85,6 +85,20 @@ pub enum Event {
         reason: String,
     },
 
+    /// Set (or overwrite) a stable **profile** attribute for a scope —
+    /// a long-term preference / trait / identity fact, distinct from
+    /// episodic memories. Re-setting the same `attribute` supersedes the
+    /// previous value; the `ProfileView` keeps the prior value as history
+    /// (never overwrite — Hard Rule #2). `value = ""` clears it.
+    ProfileSet {
+        scope: Scope,
+        /// Stable attribute key (e.g. `"diet"`, `"locale"`, `"timezone"`).
+        attribute: String,
+        value: String,
+        /// Which actor/agent asserted this (multi-agent attribution).
+        actor: Option<String>,
+    },
+
     OutcomeRecorded(Outcome),
 
     ProceduralProposed {

@@ -463,6 +463,17 @@
       </div>
     </div>
 
+    <!-- Phase 8 — profile / persona memory -->
+    <div class="section">
+      <h2>
+        <span class="col-tag">PHASE 8</span>
+        profile memory
+        <span class="hint">stable per-subject attributes · bi-temporal (re-set supersedes, history kept)</span>
+        <span id="profile-subject-pill" class="pill demo">—</span>
+      </h2>
+      <div id="profile-table"><div class="empty-msg-soft">no profile attributes yet</div></div>
+    </div>
+
     <!-- Phase 4 — bi-temporal knowledge graph -->
     <div class="section">
       <h2>
@@ -1084,15 +1095,49 @@
       }
     }
 
+    async function refreshProfile() {
+      try {
+        const r = await fetch('/api/profile');
+        if (!r.ok) return;
+        const p = await r.json();
+        const pill = document.getElementById('profile-subject-pill');
+        pill.textContent = p.user ? `${p.tenant}/${p.user}` : p.tenant;
+        const el = document.getElementById('profile-table');
+        if (!p.attributes || !p.attributes.length) {
+          el.innerHTML = '<div class="empty-msg-soft">no profile attributes yet</div>';
+          return;
+        }
+        const rows = p.attributes.map(a => {
+          const superseded = (a.history && a.history.length > 1)
+            ? a.history.slice(0, -1).map(h => escapeHtml(h.value)).join(' → ')
+            : '';
+          const histCell = superseded ? `<span class="t">${superseded} → </span>` : '';
+          return `<tr>
+            <td class="q">${escapeHtml(a.attribute)}</td>
+            <td><strong>${escapeHtml(a.value)}</strong></td>
+            <td class="t">${histCell}${a.history ? a.history.length : 1} version(s)</td>
+          </tr>`;
+        }).join('');
+        el.innerHTML = `<table>
+          <thead><tr><th>attribute</th><th>current</th><th>history</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+      } catch (err) {
+        console.warn('profile fetch failed', err);
+      }
+    }
+
     refresh();
     refreshEvolve();
     refreshProcedural();
     refreshIngest();
+    refreshProfile();
     loadGraph();
     setInterval(refresh, 3000);
     setInterval(refreshEvolve, 3000);
     setInterval(refreshProcedural, 3000);
     setInterval(refreshIngest, 3000);
+    setInterval(refreshProfile, 3000);
     setInterval(loadGraph, 3000);
   </script>
 </body>

@@ -14,6 +14,7 @@ pub mod bm25;
 pub mod chunker;
 pub mod embedder;
 pub mod partitioned_vector;
+pub mod profile;
 pub mod synthesizer;
 pub mod vector;
 
@@ -23,6 +24,7 @@ pub use chunker::{Chunker, ParagraphChunker};
 pub use embedder::FastEmbedEmbedder;
 pub use embedder::MockEmbedder;
 pub use partitioned_vector::{TenantPartitionedVectorView, TenantStats};
+pub use profile::{AttributeState, ProfileValue, ProfileView};
 pub use synthesizer::SnippetSynthesizer;
 pub use vector::VectorView;
 
@@ -30,6 +32,37 @@ use mneme_core::types::MemoryRef;
 use mneme_core::{Embedder, Hit, MnemeError, Query, Retriever};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// A graph-proximity signal source, injected so `mneme-index` stays
+/// decoupled from `mneme-graph` (the host wires the real graph view
+/// behind this; tests use a fake). Given a candidate memory and the full
+/// candidate set under consideration, return a boost in `[0.0, 1.0]` —
+/// e.g. "how densely is this memory linked to the other candidates?".
+/// Memories that sit at the centre of the retrieved neighbourhood are
+/// usually more on-topic than isolated keyword matches.
+pub trait ProximityProvider: Send + Sync {
+    fn boost(&self, memory: MemoryRef, candidates: &[MemoryRef]) -> f32;
+}
+
+/// Final reorder seam. The fused+weighted list is handed to a reranker
+/// before truncation to `k` — this is where a cross-encoder or LLM
+/// reranker plugs in (Mem0/Zep ship Cohere/HF rerankers here). The
+/// default [`IdentityReranker`] is a no-op so fusion behaviour is
+/// unchanged unless a reranker is explicitly wired.
+#[async_trait::async_trait]
+pub trait Reranker: Send + Sync {
+    async fn rerank(&self, query: &str, hits: Vec<Hit>) -> Result<Vec<Hit>, MnemeError>;
+}
+
+/// No-op reranker — returns the fused order untouched.
+pub struct IdentityReranker;
+
+#[async_trait::async_trait]
+impl Reranker for IdentityReranker {
+    async fn rerank(&self, _query: &str, hits: Vec<Hit>) -> Result<Vec<Hit>, MnemeError> {
+        Ok(hits)
+    }
+}
 
 /// Reciprocal-rank fusion constant — the classic RRF paper uses k=60 and the
 /// hybrid-search literature has converged on that value. Smaller k weights
@@ -62,6 +95,14 @@ pub struct HybridRetriever {
     over_fetch: usize,
     w_vector: f32,
     w_bm25: f32,
+    /// Weight on the recency signal (derived from each memory's ULID
+    /// timestamp). `0.0` by default — opt in via [`HybridRetriever::with_recency_weight`].
+    w_recency: f32,
+    /// Optional graph-proximity signal + its weight. `None` by default.
+    proximity: Option<Arc<dyn ProximityProvider>>,
+    w_proximity: f32,
+    /// Final reorder stage. Defaults to [`IdentityReranker`].
+    reranker: Arc<dyn Reranker>,
 }
 
 impl HybridRetriever {
@@ -81,6 +122,10 @@ impl HybridRetriever {
             over_fetch: 4,
             w_vector,
             w_bm25: 1.0,
+            w_recency: 0.0,
+            proximity: None,
+            w_proximity: 0.0,
+            reranker: Arc::new(IdentityReranker),
         }
     }
 
@@ -89,6 +134,29 @@ impl HybridRetriever {
     pub fn with_weights(mut self, w_vector: f32, w_bm25: f32) -> Self {
         self.w_vector = w_vector;
         self.w_bm25 = w_bm25;
+        self
+    }
+
+    /// Enable the recency signal. `w` scales a `[0,1]` recency bonus
+    /// (newest qualifying hit = 1.0) added on top of the fused score.
+    /// Recency only *reorders* hits that already have a real
+    /// vector/BM25 signal — it never resurrects a zero-signal hit.
+    pub fn with_recency_weight(mut self, w: f32) -> Self {
+        self.w_recency = w;
+        self
+    }
+
+    /// Wire a graph-proximity provider + its weight. Like recency, this
+    /// is a bonus on already-qualifying hits, not an independent signal.
+    pub fn with_proximity(mut self, provider: Arc<dyn ProximityProvider>, w: f32) -> Self {
+        self.proximity = Some(provider);
+        self.w_proximity = w;
+        self
+    }
+
+    /// Install a final reranker stage (default: identity).
+    pub fn with_reranker(mut self, reranker: Arc<dyn Reranker>) -> Self {
+        self.reranker = reranker;
         self
     }
 
@@ -150,20 +218,59 @@ impl Retriever for HybridRetriever {
             e.rrf += self.w_bm25 / (RRF_K + (rank + 1) as f32);
         }
 
-        let mut hits: Vec<Hit> = bucket
+        // Qualifying hits = those with a real (weighted) vector/BM25
+        // signal. Recency + proximity are *bonuses on these*, never a way
+        // to resurrect a zero-signal hit.
+        let qualifying: Vec<(MemoryRef, FusedHit)> =
+            bucket.into_iter().filter(|(_, f)| f.rrf > 0.0).collect();
+        let candidate_refs: Vec<MemoryRef> = qualifying.iter().map(|(m, _)| *m).collect();
+
+        // Recency normalisation window: ULIDs are time-ordered, so the
+        // memory id's timestamp *is* its creation time — no extra state.
+        // Newest qualifying hit scores 1.0, oldest 0.0; all-equal → 0.5.
+        let (min_ts, max_ts) = candidate_refs.iter().fold((u64::MAX, 0u64), |(lo, hi), m| {
+            let t = m.0.timestamp_ms();
+            (lo.min(t), hi.max(t))
+        });
+        let span = max_ts.saturating_sub(min_ts);
+        let recency_score = |m: MemoryRef| -> f32 {
+            if self.w_recency == 0.0 {
+                return 0.0;
+            }
+            if span == 0 {
+                0.5
+            } else {
+                (m.0.timestamp_ms().saturating_sub(min_ts)) as f32 / span as f32
+            }
+        };
+
+        let mut hits: Vec<Hit> = qualifying
             .into_iter()
-            // A zero rrf means no weighted signal contributed — drop the
-            // hit rather than letting noise from a 0-weighted signal show
-            // up at the bottom of the list.
-            .filter(|(_, f)| f.rrf > 0.0)
-            .map(|(memory, f)| Hit {
-                memory,
-                score: f.rrf,
-                breakdown: vec![
+            .map(|(memory, f)| {
+                let recency = recency_score(memory);
+                let graph = match &self.proximity {
+                    Some(p) if self.w_proximity != 0.0 => p.boost(memory, &candidate_refs),
+                    _ => 0.0,
+                };
+                let score = f.rrf + self.w_recency * recency + self.w_proximity * graph;
+                let mut breakdown = vec![
                     ("vector".to_string(), f.vector_score),
                     ("bm25".to_string(), f.bm25_score),
                     ("rrf".to_string(), f.rrf),
-                ],
+                ];
+                // Only surface the auxiliary signals when they're active,
+                // so the breakdown stays clean for the common case.
+                if self.w_recency != 0.0 {
+                    breakdown.push(("recency".to_string(), recency));
+                }
+                if self.w_proximity != 0.0 && self.proximity.is_some() {
+                    breakdown.push(("graph".to_string(), graph));
+                }
+                Hit {
+                    memory,
+                    score,
+                    breakdown,
+                }
             })
             .collect();
         hits.sort_by(|a, b| {
@@ -171,6 +278,11 @@ impl Retriever for HybridRetriever {
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
+
+        // Final reorder stage (identity by default). Rerank the
+        // over-fetched, fused list, then truncate to k so a reranker can
+        // promote a hit from outside the naive top-k.
+        let mut hits = self.reranker.rerank(&query.text, hits).await?;
         hits.truncate(query.k);
         Ok(hits)
     }
@@ -279,7 +391,13 @@ mod tests {
             .unwrap();
         let h = hits.first().expect("expected at least one hit");
         let names: Vec<_> = h.breakdown.iter().map(|(n, _)| n.as_str()).collect();
-        assert_eq!(names, vec!["vector", "bm25", "rrf"]);
+        // The three base signals are always present; recency/graph are
+        // added only when their weights are non-zero (off by default).
+        assert!(names.contains(&"vector"));
+        assert!(names.contains(&"bm25"));
+        assert!(names.contains(&"rrf"));
+        assert!(!names.contains(&"recency"), "recency off by default");
+        assert!(!names.contains(&"graph"), "graph off by default");
     }
 
     #[tokio::test]
@@ -345,6 +463,147 @@ mod tests {
         assert_eq!(
             hits[0].memory, refs[1],
             "revenue memory must rank #1 with BM25-only fusion"
+        );
+    }
+
+    #[tokio::test]
+    async fn recency_weight_reorders_equal_signal_hits() {
+        // Two memories with the *same* keyword so BM25 ranks them equally;
+        // the newer one (later ULID) must win once recency is weighted.
+        let embedder = Arc::new(MockEmbedder::new(32));
+        let vector = Arc::new(VectorView::new(
+            embedder.dim(),
+            embedder.model_id().to_string(),
+        ));
+        let bm25 = Arc::new(Bm25View::new().unwrap());
+        let scope = Scope::global("t");
+
+        let mut refs = Vec::new();
+        for _ in 0..2 {
+            let m = Memory {
+                id: new_id(),
+                scope: scope.clone(),
+                content: "quarterly revenue update".into(),
+                keywords: vec![],
+                tags: vec![],
+                context: String::new(),
+                embedding: None,
+                links: vec![],
+                parent: None,
+                evolution_count: 0,
+                time: BiTemporal::now(),
+                provenance: Provenance::default(),
+                source: None,
+                position: None,
+            };
+            refs.push(MemoryRef(m.id));
+            let entry = LogEntry {
+                id: new_id(),
+                event: Event::MemoryWritten(m),
+            };
+            vector.apply(&entry).await.unwrap();
+            bm25.apply(&entry).await.unwrap();
+            // Ensure a strictly later ULID timestamp for the second memory.
+            tokio::time::sleep(std::time::Duration::from_millis(3)).await;
+        }
+        let newer = refs[1]; // created second → later ULID
+
+        let r = HybridRetriever::new(vector, bm25, embedder).with_recency_weight(0.05);
+        let hits = r
+            .search(&Query {
+                text: "revenue".into(),
+                scope,
+                k: 2,
+                time_filter: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(
+            hits[0].memory, newer,
+            "newer memory should rank first with recency on"
+        );
+        assert!(hits[0].breakdown.iter().any(|(n, _)| n == "recency"));
+    }
+
+    /// Proximity provider that boosts exactly one target ref.
+    struct BoostOne(MemoryRef);
+    impl ProximityProvider for BoostOne {
+        fn boost(&self, memory: MemoryRef, _candidates: &[MemoryRef]) -> f32 {
+            if memory == self.0 {
+                1.0
+            } else {
+                0.0
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn proximity_boost_promotes_target() {
+        let (vector, bm25, embedder, scope, refs) = build_corpus().await;
+        // "quarter" appears in two memories (idx 2 + 3) so both qualify on
+        // BM25; boost idx 3 and it should top the list.
+        let target = refs[3];
+        let r = HybridRetriever::new(vector, bm25, embedder)
+            .with_proximity(Arc::new(BoostOne(target)), 0.1);
+        let hits = r
+            .search(&Query {
+                text: "quarter".into(),
+                scope,
+                k: 4,
+                time_filter: None,
+            })
+            .await
+            .unwrap();
+        assert!(!hits.is_empty());
+        assert_eq!(
+            hits[0].memory, target,
+            "proximity-boosted memory should rank first"
+        );
+        assert!(hits[0].breakdown.iter().any(|(n, _)| n == "graph"));
+    }
+
+    /// Reranker that reverses the fused order — proves the stage runs.
+    struct ReverseReranker;
+    #[async_trait::async_trait]
+    impl Reranker for ReverseReranker {
+        async fn rerank(&self, _q: &str, mut hits: Vec<Hit>) -> Result<Vec<Hit>, MnemeError> {
+            hits.reverse();
+            Ok(hits)
+        }
+    }
+
+    #[tokio::test]
+    async fn reranker_stage_reorders_then_truncates() {
+        let (vector, bm25, embedder, scope, _refs) = build_corpus().await;
+        let baseline = HybridRetriever::new(vector.clone(), bm25.clone(), embedder.clone());
+        let base_hits = baseline
+            .search(&Query {
+                text: "quarter".into(),
+                scope: scope.clone(),
+                k: 2,
+                time_filter: None,
+            })
+            .await
+            .unwrap();
+
+        let reranked =
+            HybridRetriever::new(vector, bm25, embedder).with_reranker(Arc::new(ReverseReranker));
+        let rr_hits = reranked
+            .search(&Query {
+                text: "quarter".into(),
+                scope,
+                k: 2,
+                time_filter: None,
+            })
+            .await
+            .unwrap();
+        // Reverse runs over the over-fetched list before truncation, so the
+        // reranked top should differ from the fused top when >k qualified.
+        assert!(!rr_hits.is_empty());
+        assert_ne!(
+            base_hits[0].memory, rr_hits[0].memory,
+            "reranker must change the head order"
         );
     }
 

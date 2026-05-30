@@ -6,7 +6,7 @@
     <a href="https://github.com/aniketshukla1/mneme/actions"><img alt="Build Status" src="https://img.shields.io/badge/build-passing-brightgreen"></a>
     <a href="https://crates.io/crates/mneme"><img alt="Version" src="https://img.shields.io/badge/version-v0.1.0-blue"></a>
     <a href="https://github.com/aniketshukla1/mneme/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
-    <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-341%20passing-brightgreen"></a>
+    <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-354%20passing-brightgreen"></a>
   </p>
 </div>
 
@@ -31,7 +31,7 @@ Two continuous loops operate over a single append-only event log:
 git clone https://github.com/aniketshukla1/mneme.git
 cd mneme
 
-# Run the workspace tests (341 passing)
+# Run the workspace tests (354 passing)
 cargo test --workspace
 
 # Boot the demo: live retrieval + memory evolution + procedural compiler
@@ -40,7 +40,7 @@ MNEME_DEMO=1 MNEME_PROCEDURAL=on cargo run -p mneme-server
 
 Then open:
 - **http://127.0.0.1:7777/** — live chat-style retrieval (hybrid vector + BM25 + extractive synthesis)
-- **http://127.0.0.1:7777/dashboard** — real-time benchmarks: latency, BM25 tier distribution, memory evolution chains, **procedural learning curve**, an **ingestion-intelligence** panel (raw turns → ADD / UPDATE(contradiction) / NOOP, served by `/api/ingest/metrics`), and a **bi-temporal knowledge-graph** panel (`/api/graph`)
+- **http://127.0.0.1:7777/dashboard** — real-time benchmarks: latency, BM25 tier distribution, memory evolution chains, **procedural learning curve**, an **ingestion-intelligence** panel (raw turns → ADD / UPDATE(contradiction) / NOOP, served by `/api/ingest/metrics`), and a **bi-temporal knowledge-graph** panel (`/api/graph`), and a **profile/persona** panel (`/api/profile`)
 
 In the demo, watch the **PROCEDURAL** section's learning curve climb from ~33% to 100% while the safety probe line stays glued at 100% — that's the Phase 2 "done when" criterion satisfied live.
 
@@ -72,7 +72,7 @@ Eleven crates, each with a focused responsibility. External dependencies sit beh
 | `mneme-llm` | `LlmClient` implementations: `FakeLlmClient`, `OllamaLlmClient` (feature-gated) | ✅ |
 | `mneme-evolve` | Bounded A-MEM-style memory evolution worker | ✅ Phase 1 |
 | `mneme-procedural` | GEPA-style procedural compiler + gate + eval suite + learning curve | ✅ Phase 2 |
-| `mneme-bench` | Headless benchmark harness — GSM8K-tiny + HumanEval-tiny + CSV output | ✅ Phase 2 |
+| `mneme-bench` | Eval-as-product harness — procedural learning curve (GSM8K/HumanEval) + memory recall@k (LOCOMO/LongMemEval) | ✅ Phase 2/6 |
 | `mneme-server` | Host process: HTTP API, dashboard, demo wiring | ✅ |
 | `mneme-mcp` | MCP server: exposes mneme as tools to Claude Desktop / Cline / any MCP client | ✅ Phase 5 |
 | `mneme-py` | Python bindings via pyo3 — pip-installable | ✅ Phase 5 |
@@ -157,6 +157,33 @@ Two suites ship in-binary today — hand-curated, license-clean:
 | `humaneval` | 5 Python code-completion prompts | 3 | predicate, builtins, string, branching |
 
 External suites land via a future `--suite path/to/suite.json` flag (JSON schema in `crates/mneme-bench/data/`).
+
+### Memory recall — LOCOMO / LongMemEval
+
+A third subcommand, `memeval`, benchmarks the **memory layer itself** (not the
+procedural compiler): it ingests a haystack of memories through the *real*
+`FjallEventLog → VectorView + Bm25View → HybridRetriever` path, then asks
+questions and reports **recall@k** — does any top-`k` memory contain the gold
+answer span? — overall and per category (single-hop / multi-hop / temporal /
+knowledge-update / open-domain).
+
+```bash
+# Offline smoke (mock embedder, BM25-dominated):
+cargo run -p mneme-bench -- memeval --suite locomo --k 10
+cargo run -p mneme-bench -- memeval --suite longmemeval --k 10 --output json
+
+# Real semantic number (downloads bge-small on first run):
+cargo run -p mneme-bench -- memeval --suite locomo --embedder fastembed
+
+# CI floor — exit 1 if recall@k drops below the bar:
+cargo run -p mneme-bench -- memeval --suite locomo --min-recall 0.8
+```
+
+Two hand-curated, license-clean mini suites ship in-binary (`locomo_mini`,
+`longmemeval_mini`). They're **smoke-scale** (≈12 memories) — under the `mock`
+embedder recall is BM25-driven and HNSW tie-breaks make the borderline
+question non-deterministic, so set CI floors with margin and quote published
+numbers from `--embedder fastembed` against the full datasets.
 
 ---
 
@@ -333,10 +360,10 @@ The dashboard renders this as a dual-line chart with a `safety 100%` pill that f
 ```
 mneme-core        :   3 tests
 mneme-llm         :  27 tests
-mneme-index       :  64 tests
+mneme-index       :  74 tests
 mneme-evolve      :  11 tests
 mneme-procedural  : 102 unit + 5 integration tests
-mneme-bench       :   9 tests
+mneme-bench       :  12 tests
 mneme-mcp         :  24 unit + 2 integration tests
 mneme-py          :   7 tests (Rust-side inner-client coverage)
 mneme-server      :  26 tests
@@ -344,7 +371,7 @@ mneme-store       :   1 test
 mneme-graph       :  27 tests
 mneme-extract     :  33 tests
 ──────────────────────────────
-TOTAL             : 341 tests · all passing on both default and --no-default-features
+TOTAL             : 354 tests · all passing on both default and --no-default-features
 ```
 
 ---
@@ -378,7 +405,7 @@ References embedded in the code:
 
 ## ⚠️ Stability
 
-This is `0.1.0` — the first usable release. The system is end-to-end working with 341 passing tests across all six build phases, but the public API surface will still move as the graph store and procedural compiler gain real-world mileage. Pin a specific version in your `Cargo.toml`; expect breaking changes between `0.x.y` bumps.
+This is `0.1.0` — the first usable release. The system is end-to-end working with 354 passing tests across all six build phases, but the public API surface will still move as the graph store and procedural compiler gain real-world mileage. Pin a specific version in your `Cargo.toml`; expect breaking changes between `0.x.y` bumps.
 
 ---
 

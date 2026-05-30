@@ -18,7 +18,7 @@ use mneme_core::event::{ChangeSet, Event, LogEntry};
 use mneme_core::traits::MaterializedView;
 use mneme_core::types::{new_id, BiTemporal, MemoryRef, SourceRef};
 use mneme_core::{EventLog, Scope};
-use mneme_index::{Bm25View, Chunker, ParagraphChunker, VectorView};
+use mneme_index::{Bm25View, Chunker, ParagraphChunker, ProfileView, VectorView};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,9 +27,14 @@ use std::time::Duration;
 const TICK: Duration = Duration::from_millis(700);
 
 /// Spawns the demo writer onto the current Tokio runtime.
-pub fn spawn(log: Arc<dyn EventLog>, vector: Arc<VectorView>, bm25: Arc<Bm25View>) {
+pub fn spawn(
+    log: Arc<dyn EventLog>,
+    vector: Arc<VectorView>,
+    bm25: Arc<Bm25View>,
+    profile: Arc<ProfileView>,
+) {
     tokio::spawn(async move {
-        if let Err(e) = run(log, vector, bm25).await {
+        if let Err(e) = run(log, vector, bm25, profile).await {
             tracing::error!(error = %e, "demo writer failed");
         }
     });
@@ -173,6 +178,7 @@ async fn run(
     log: Arc<dyn EventLog>,
     vector: Arc<VectorView>,
     bm25: Arc<Bm25View>,
+    profile: Arc<ProfileView>,
 ) -> anyhow::Result<()> {
     let scope = Scope {
         tenant: "demo".into(),
@@ -324,7 +330,42 @@ async fn run(
     tokio::time::sleep(Duration::from_millis(1_200)).await;
     stream_observations(log.as_ref(), &scope).await?;
 
+    // --- Phase 8 (P1#6): profile / persona memory ---
+    // Set a few stable attributes, including a supersede (vegetarian →
+    // vegan) so the dashboard shows the bi-temporal history.
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    stream_profile(log.as_ref(), profile.as_ref(), &scope).await?;
+
     tracing::info!(seeds = CORPUS.len(), evolutions = 2, "demo writer finished");
+    Ok(())
+}
+
+/// Append + apply a handful of `ProfileSet` events for the demo subject.
+async fn stream_profile(
+    log: &dyn EventLog,
+    profile: &ProfileView,
+    scope: &Scope,
+) -> anyhow::Result<()> {
+    let sets: &[(&str, &str)] = &[
+        ("locale", "en-GB"),
+        ("timezone", "Pacific Time"),
+        ("diet", "vegetarian"),
+        ("answer_style", "concise"),
+        // Supersede: the subject went vegan — old value kept as history.
+        ("diet", "vegan"),
+    ];
+    for (attribute, value) in sets {
+        let event = Event::ProfileSet {
+            scope: scope.clone(),
+            attribute: (*attribute).into(),
+            value: (*value).into(),
+            actor: Some("alice".into()),
+        };
+        let id = log.append(event.clone()).await?;
+        profile.apply(&LogEntry { id, event }).await?;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    tracing::info!("demo: set 5 profile attributes (incl. one supersede)");
     Ok(())
 }
 

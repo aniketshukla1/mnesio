@@ -30,7 +30,7 @@ use mneme_core::{
 };
 use mneme_evolve::EvolutionWorker;
 use mneme_graph::{FjallGraphView, Relation};
-use mneme_index::{Bm25View, HybridRetriever, VectorView};
+use mneme_index::{Bm25View, HybridRetriever, ProfileView, VectorView};
 use mneme_procedural::{ProceduralStore, ProceduralWorker};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -73,6 +73,9 @@ pub struct AppState {
     /// Phase-7 ingestion worker (extract + consolidate raw observations).
     /// `None` when disabled; `/api/ingest/metrics` reports `enabled=false`.
     pub ingestion: Option<Arc<crate::ingestion_worker::IngestionWorker>>,
+    /// Phase-8 (P1#6) profile / persona view — stable per-subject
+    /// attributes surfaced by `/api/profile`.
+    pub profile: Arc<ProfileView>,
     /// Tenant the viz operates in. The demo writer uses "demo"; production
     /// will plumb this from auth.
     pub default_tenant: String,
@@ -713,6 +716,69 @@ pub async fn evolve_metrics(State(state): State<Arc<AppState>>) -> Response {
         worker_state,
     };
     no_cache(Json(payload).into_response())
+}
+
+/// `GET /api/profile` — current profile attributes for the default
+/// subject, plus the bi-temporal history of each. Personalization
+/// surface: this is the stable persona an agent conditions on.
+pub async fn profile(State(state): State<Arc<AppState>>) -> Response {
+    // The demo subject is tenant=demo, user=alice. Production derives
+    // this from auth context.
+    let scope = Scope {
+        tenant: state.default_tenant.clone(),
+        user: Some("alice".into()),
+        session: None,
+    };
+    let current: Vec<ProfileAttrDto> = state
+        .profile
+        .all(&scope)
+        .into_iter()
+        .map(|(attribute, value)| {
+            let history: Vec<ProfileHistoryDto> = state
+                .profile
+                .history(&scope, &attribute)
+                .into_iter()
+                .map(|v| ProfileHistoryDto {
+                    value: v.value,
+                    set_at_ms: v.set_at_ms,
+                    actor: v.actor,
+                })
+                .collect();
+            ProfileAttrDto {
+                attribute,
+                value,
+                history,
+            }
+        })
+        .collect();
+    let payload = ProfileResponse {
+        tenant: scope.tenant,
+        user: scope.user,
+        attributes: current,
+    };
+    no_cache(Json(payload).into_response())
+}
+
+#[derive(Serialize)]
+pub struct ProfileResponse {
+    pub tenant: String,
+    pub user: Option<String>,
+    pub attributes: Vec<ProfileAttrDto>,
+}
+
+#[derive(Serialize)]
+pub struct ProfileAttrDto {
+    pub attribute: String,
+    pub value: String,
+    /// Oldest → newest, including the current value as the last element.
+    pub history: Vec<ProfileHistoryDto>,
+}
+
+#[derive(Serialize)]
+pub struct ProfileHistoryDto {
+    pub value: String,
+    pub set_at_ms: u64,
+    pub actor: Option<String>,
 }
 
 /// `GET /api/ingest/metrics` — Phase-7 ingestion telemetry (extract +
@@ -1689,6 +1755,7 @@ fn event_kind(e: &Event) -> &'static str {
         Event::MemoryEvolved { .. } => "MemoryEvolved",
         Event::MemoryInvalidated { .. } => "MemoryInvalidated",
         Event::ObservationRecorded { .. } => "ObservationRecorded",
+        Event::ProfileSet { .. } => "ProfileSet",
         Event::SourceIngested(_) => "SourceIngested",
         Event::SourceInvalidated { .. } => "SourceInvalidated",
         Event::OutcomeRecorded(_) => "OutcomeRecorded",
@@ -1746,6 +1813,15 @@ fn describe_event(e: &Event) -> String {
             match actor {
                 Some(a) => format!("observed [{a}] «{snippet}»"),
                 None => format!("observed «{snippet}»"),
+            }
+        }
+        Event::ProfileSet {
+            attribute, value, ..
+        } => {
+            if value.is_empty() {
+                format!("profile cleared · {attribute}")
+            } else {
+                format!("profile set · {attribute} = {value}")
             }
         }
         Event::SourceIngested(s) => {
