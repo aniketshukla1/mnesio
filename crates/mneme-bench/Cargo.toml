@@ -11,6 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 mneme-core.workspace = true
+mneme-store.workspace = true
+mneme-index.workspace = true
 mneme-procedural.workspace = true
 mneme-llm = { workspace = true, default-features = false }
 tokio.workspace = true

@@ -24,6 +24,7 @@
 //!   alignment drift is the hard stop.
 
 use anyhow::{bail, Result};
+use mneme_bench::memeval::{load_memeval_suite, run_memeval, MemEvalReport};
 use mneme_bench::report::{render_comparison, render_learning_curve};
 use mneme_bench::{
     compare_artifacts, load_suite, run_bench, BenchRun, BenchSuite, ComparisonReport, DemoBenchLlm,
@@ -36,6 +37,8 @@ use std::sync::Arc;
 
 const GSM8K_JSON: &str = include_str!("../data/gsm8k_tiny.json");
 const HUMANEVAL_JSON: &str = include_str!("../data/humaneval_tiny.json");
+const LOCOMO_JSON: &str = include_str!("../data/locomo_mini.json");
+const LONGMEMEVAL_JSON: &str = include_str!("../data/longmemeval_mini.json");
 
 const SEED_PROMPT: &str = "You are a helpful assistant. Answer the question.";
 
@@ -51,7 +54,117 @@ async fn main() -> Result<()> {
     match args.command {
         Command::Run(opts) => cmd_run(opts).await,
         Command::Compare(opts) => cmd_compare(opts).await,
+        Command::MemEval(opts) => cmd_memeval(opts).await,
     }
+}
+
+// ---------------- memeval (memory recall) ----------------
+
+async fn cmd_memeval(opts: MemEvalOpts) -> Result<()> {
+    let json = match opts.suite.as_str() {
+        "locomo" => LOCOMO_JSON,
+        "longmemeval" => LONGMEMEVAL_JSON,
+        other => bail!("unknown --suite {other:?}; expected `locomo` or `longmemeval`"),
+    };
+    let suite = load_memeval_suite(json)?;
+    eprintln!(
+        "# mneme-bench memeval · suite={} · k={} · embedder={}",
+        suite.name, opts.k, opts.embedder
+    );
+    let report = run_memeval(&suite, opts.k, &opts.embedder).await?;
+
+    let out_text = match opts.output {
+        OutputFormat::Json => format_memeval_json(&report)?,
+        OutputFormat::Markdown | OutputFormat::Csv | OutputFormat::Html => {
+            format_memeval_markdown(&report)
+        }
+    };
+    write_output(&opts.out_path, &out_text)?;
+    write_memeval_summary_to_stderr(&report);
+
+    // CI gate: recall floor.
+    if let Some(min_recall) = opts.min_recall {
+        if report.recall() < min_recall {
+            eprintln!(
+                "# REGRESSION: recall@{} {:.1}% below floor {:.1}%. Exit 1.",
+                report.k,
+                report.recall() * 100.0,
+                min_recall * 100.0
+            );
+            std::process::exit(1);
+        }
+    }
+    Ok(())
+}
+
+fn format_memeval_markdown(report: &MemEvalReport) -> String {
+    let mut out = format!(
+        "# mneme-bench · {} · recall@{} (embedder: {})\n\n",
+        report.suite_name, report.k, report.embedder
+    );
+    out.push_str(&format!(
+        "**Overall recall@{}: {:.1}%** ({}/{} questions) · {} memories · {:.2} ms/query\n\n",
+        report.k,
+        report.recall() * 100.0,
+        report.recalled,
+        report.total_questions,
+        report.memory_count,
+        report.mean_latency_ms,
+    ));
+    out.push_str("| category | recall | recalled / total |\n|---|---|---|\n");
+    for c in &report.per_category {
+        out.push_str(&format!(
+            "| {} | {:.1}% | {} / {} |\n",
+            c.category,
+            c.rate() * 100.0,
+            c.recalled,
+            c.total
+        ));
+    }
+    out
+}
+
+fn format_memeval_json(report: &MemEvalReport) -> Result<String> {
+    use serde_json::json;
+    let cats: Vec<_> = report
+        .per_category
+        .iter()
+        .map(|c| {
+            json!({
+                "category": c.category,
+                "recalled": c.recalled,
+                "total": c.total,
+                "recall": c.rate(),
+            })
+        })
+        .collect();
+    let payload = json!({
+        "suite_name": report.suite_name,
+        "embedder": report.embedder,
+        "k": report.k,
+        "memory_count": report.memory_count,
+        "total_questions": report.total_questions,
+        "recalled": report.recalled,
+        "recall": report.recall(),
+        "mean_latency_ms": report.mean_latency_ms,
+        "per_category": cats,
+    });
+    Ok(serde_json::to_string_pretty(&payload)?)
+}
+
+fn write_memeval_summary_to_stderr(report: &MemEvalReport) {
+    eprintln!();
+    eprintln!("# summary:");
+    eprintln!("#   suite:        {}", report.suite_name);
+    eprintln!("#   embedder:     {}", report.embedder);
+    eprintln!(
+        "#   recall@{}:     {:.1}% ({}/{})",
+        report.k,
+        report.recall() * 100.0,
+        report.recalled,
+        report.total_questions
+    );
+    eprintln!("#   mean latency: {:.2} ms/query", report.mean_latency_ms);
 }
 
 // ---------------- run ----------------
@@ -470,6 +583,16 @@ fn write_output(out_path: &Option<std::path::PathBuf>, content: &str) -> Result<
 enum Command {
     Run(RunOpts),
     Compare(CompareOpts),
+    MemEval(MemEvalOpts),
+}
+
+struct MemEvalOpts {
+    suite: String,
+    k: usize,
+    embedder: String,
+    output: OutputFormat,
+    out_path: Option<std::path::PathBuf>,
+    min_recall: Option<f32>,
 }
 
 struct RunOpts {
@@ -524,6 +647,10 @@ fn parse_args() -> Result<RootArgs> {
             iter.next();
             "compare"
         }
+        Some("memeval") => {
+            iter.next();
+            "memeval"
+        }
         Some("--help") | Some("-h") => {
             print_help();
             std::process::exit(0);
@@ -540,8 +667,42 @@ fn parse_args() -> Result<RootArgs> {
         "compare" => Ok(RootArgs {
             command: Command::Compare(parse_compare(iter)?),
         }),
+        "memeval" => Ok(RootArgs {
+            command: Command::MemEval(parse_memeval(iter)?),
+        }),
         _ => unreachable!(),
     }
+}
+
+fn parse_memeval(
+    mut iter: std::iter::Peekable<impl Iterator<Item = String>>,
+) -> Result<MemEvalOpts> {
+    let mut opts = MemEvalOpts {
+        suite: "locomo".into(),
+        k: 10,
+        embedder: "mock".into(),
+        output: OutputFormat::Markdown,
+        out_path: None,
+        min_recall: None,
+    };
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--suite" => opts.suite = next_value(&mut iter, "--suite")?,
+            "--k" => opts.k = next_value(&mut iter, "--k")?.parse()?,
+            "--embedder" => opts.embedder = next_value(&mut iter, "--embedder")?,
+            "--output" => opts.output = OutputFormat::parse(&next_value(&mut iter, "--output")?)?,
+            "--out" => opts.out_path = Some(next_value(&mut iter, "--out")?.into()),
+            "--min-recall" => {
+                opts.min_recall = Some(next_value(&mut iter, "--min-recall")?.parse()?)
+            }
+            "--help" | "-h" => {
+                print_help();
+                std::process::exit(0);
+            }
+            other => bail!("unknown argument {other:?}; pass --help for usage"),
+        }
+    }
+    Ok(opts)
 }
 
 struct RootArgs {
@@ -640,6 +801,13 @@ fn print_help() {
          \x20\x20run        iterate the compiler against a suite, emit a learning curve\n\
          \x20\x20             (default — invoked when no subcommand is given)\n\
          \x20\x20compare    A vs B evaluation of two artifact bodies against a fixed suite\n\
+         \x20\x20memeval    memory recall@k over the real ingest→retrieve path\n\
+         \n\
+         MEMEVAL OPTIONS:\n\
+         \x20\x20--suite          locomo | longmemeval             (default: locomo)\n\
+         \x20\x20--k              N                                (default: 10)\n\
+         \x20\x20--embedder       mock | fastembed                 (default: mock)\n\
+         \x20\x20--min-recall N   exit 1 if recall@k falls below N (0..1)\n\
          \n\
          SHARED OPTIONS:\n\
          \x20\x20--suite          gsm8k | humaneval                (default: gsm8k)\n\

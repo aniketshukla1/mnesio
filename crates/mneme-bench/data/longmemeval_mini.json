@@ -1,0 +1,30 @@
+{
+  "name": "longmemeval-mini",
+  "description": "LongMemEval-style assistant-memory recall across categories: user preferences, knowledge updates, and temporal reasoning over a long session history. Hand-curated + license-clean (not the LongMemEval dataset itself).",
+  "memories": [
+    {"content": "The user prefers responses written in British English spelling.", "tags": ["preference"]},
+    {"content": "The user said they are vegetarian and do not eat any meat or fish.", "tags": ["preference", "diet"]},
+    {"content": "The user's home timezone is Pacific Time and they prefer meetings after 10am.", "tags": ["preference", "schedule"]},
+    {"content": "The user mentioned their daughter Aria is starting kindergarten this fall.", "tags": ["family"]},
+    {"content": "Earlier the user said their favourite programming language was Python.", "tags": ["preference", "knowledge-update"]},
+    {"content": "The user later updated that their favourite language is now Rust after switching teams.", "tags": ["preference", "knowledge-update"]},
+    {"content": "The user booked a flight to Tokyo departing on the 14th of November.", "tags": ["travel", "temporal"]},
+    {"content": "The user said the Tokyo trip was moved earlier to the 7th of November due to a conference.", "tags": ["travel", "temporal", "knowledge-update"]},
+    {"content": "The user is learning to play the piano and practises for thirty minutes each evening.", "tags": ["hobby"]},
+    {"content": "The user works as a UX researcher at a fintech startup called Ledgerly.", "tags": ["work"]},
+    {"content": "The user is allergic to penicillin and carries an alert card.", "tags": ["health"]},
+    {"content": "The user prefers concise answers and dislikes long preambles.", "tags": ["preference", "style"]}
+  ],
+  "questions": [
+    {"question": "What English spelling does the user prefer?", "answer_substring": "British English", "category": "preference"},
+    {"question": "What are the user's dietary restrictions?", "answer_substring": "vegetarian", "category": "preference"},
+    {"question": "What is the user's current favourite programming language?", "answer_substring": "Rust", "category": "knowledge-update"},
+    {"question": "When does the user's Tokyo flight now depart?", "answer_substring": "7th of November", "category": "knowledge-update"},
+    {"question": "What company does the user work for?", "answer_substring": "Ledgerly", "category": "single-hop"},
+    {"question": "What medication is the user allergic to?", "answer_substring": "penicillin", "category": "single-hop"},
+    {"question": "What instrument is the user learning?", "answer_substring": "piano", "category": "single-hop"},
+    {"question": "What time of day does the user prefer meetings?", "answer_substring": "after 10am", "category": "temporal"},
+    {"question": "How does the user like answers formatted?", "answer_substring": "concise", "category": "preference"},
+    {"question": "Who is starting kindergarten in the user's family?", "answer_substring": "Aria", "category": "single-hop"}
+  ]
+}

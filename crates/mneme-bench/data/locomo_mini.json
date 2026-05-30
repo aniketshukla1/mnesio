@@ -1,0 +1,30 @@
+{
+  "name": "locomo-mini",
+  "description": "LOCOMO-style long-conversation memory recall: a haystack of dialogue-derived facts about a few people, then single-hop, multi-hop, temporal, and open-domain questions. Hand-curated + license-clean (not the LOCOMO dataset itself).",
+  "memories": [
+    {"content": "Maya told the group she adopted a rescue greyhound named Pixel in January.", "tags": ["maya", "pets"]},
+    {"content": "Maya mentioned she is allergic to shellfish and once ended up in the ER after eating shrimp.", "tags": ["maya", "health"]},
+    {"content": "Maya started a new job as a data scientist at Northwind Labs in February.", "tags": ["maya", "career"]},
+    {"content": "Maya said Northwind Labs is headquartered in Seattle and she works remotely from Denver.", "tags": ["maya", "location"]},
+    {"content": "Dev is training for the Chicago marathon and runs every morning before work.", "tags": ["dev", "fitness"]},
+    {"content": "Dev switched from a vegetarian to a vegan diet in March for ethical reasons.", "tags": ["dev", "diet"]},
+    {"content": "Dev and Maya went to college together at the University of Michigan.", "tags": ["dev", "maya", "history"]},
+    {"content": "Priya bought her first house in the Oakland hills in April after years of renting.", "tags": ["priya", "housing"]},
+    {"content": "Priya plays cello in a community orchestra that performs twice a year.", "tags": ["priya", "hobbies"]},
+    {"content": "Priya is Dev's manager on the platform infrastructure team.", "tags": ["priya", "dev", "work"]},
+    {"content": "The friends are planning a group trip to Lisbon in September to celebrate Maya's new job.", "tags": ["trip", "maya"]},
+    {"content": "Maya is bringing Pixel to the Lisbon trip because the rental is pet-friendly.", "tags": ["trip", "maya", "pets"]}
+  ],
+  "questions": [
+    {"question": "What is the name of Maya's dog?", "answer_substring": "Pixel", "category": "single-hop"},
+    {"question": "What food is Maya allergic to?", "answer_substring": "shellfish", "category": "single-hop"},
+    {"question": "Where is Maya's employer Northwind Labs headquartered?", "answer_substring": "Seattle", "category": "single-hop"},
+    {"question": "What marathon is Dev training for?", "answer_substring": "Chicago marathon", "category": "single-hop"},
+    {"question": "Which university did Dev and Maya both attend?", "answer_substring": "Michigan", "category": "multi-hop"},
+    {"question": "Who manages Dev on the infrastructure team?", "answer_substring": "Priya", "category": "multi-hop"},
+    {"question": "In which month did Maya start her new job?", "answer_substring": "February", "category": "temporal"},
+    {"question": "When did Dev change to a vegan diet?", "answer_substring": "March", "category": "temporal"},
+    {"question": "Why is the group traveling to Lisbon?", "answer_substring": "new job", "category": "open-domain"},
+    {"question": "Why can Maya bring her dog on the Lisbon trip?", "answer_substring": "pet-friendly", "category": "open-domain"}
+  ]
+}
