@@ -336,7 +336,44 @@ async fn run(
     tokio::time::sleep(Duration::from_millis(900)).await;
     stream_profile(log.as_ref(), profile.as_ref(), &scope).await?;
 
+    // --- Phase 8 (P1#7): multi-agent attribution + ACL ---
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    stream_agents(log.as_ref(), &scope).await?;
+
     tracing::info!(seeds = CORPUS.len(), evolutions = 2, "demo writer finished");
+    Ok(())
+}
+
+/// Two agent-attributed observations (the ingestion worker attributes
+/// each resulting memory to its actor via provenance) + a cross-agent
+/// read grant (scout → analyst).
+async fn stream_agents(log: &dyn EventLog, scope: &Scope) -> anyhow::Result<()> {
+    let observations: &[(&str, &str)] = &[
+        (
+            "scout",
+            "The competitor Globex shipped a new pricing tier last week.",
+        ),
+        (
+            "analyst",
+            "Customer churn rose to 4.2% in the enterprise segment this quarter.",
+        ),
+    ];
+    for (actor, content) in observations {
+        log.append(Event::ObservationRecorded {
+            scope: scope.clone(),
+            content: (*content).into(),
+            actor: Some((*actor).into()),
+        })
+        .await?;
+        tokio::time::sleep(Duration::from_millis(700)).await;
+    }
+    log.append(Event::AgentAccessGranted {
+        tenant: scope.tenant.clone(),
+        owner: "scout".into(),
+        grantee: "analyst".into(),
+    })
+    .await?;
+    tracing::info!("demo: 2 agent observations + 1 cross-agent grant (scout→analyst)");
     Ok(())
 }
 

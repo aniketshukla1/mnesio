@@ -76,6 +76,10 @@ pub struct AppState {
     /// Phase-8 (P1#6) profile / persona view — stable per-subject
     /// attributes surfaced by `/api/profile`.
     pub profile: Arc<ProfileView>,
+    /// Phase-8 (P1#7) multi-agent attribution + inter-agent ACL view.
+    /// `/api/search?actor=X` filters hits through it; `/api/agents`
+    /// reports attribution + grants.
+    pub acl: Arc<AgentAclView>,
     /// Tenant the viz operates in. The demo writer uses "demo"; production
     /// will plumb this from auth.
     pub default_tenant: String,
@@ -273,6 +277,10 @@ pub struct SearchParams {
     /// Defaults to 5 if absent.
     #[serde(default = "default_k")]
     pub k: usize,
+    /// Optional requesting agent. When set, results are filtered through
+    /// the inter-agent ACL (P1#7): the actor sees its own + system +
+    /// granted memories only. Absent → no ACL filtering (legacy behavior).
+    pub actor: Option<String>,
 }
 
 fn default_k() -> usize {
@@ -515,6 +523,17 @@ pub async fn search(
     phases.source_boost_ms = t.elapsed().as_millis() as u64;
     let post_boost_top = hybrid_hits.first().map(|h| h.memory);
     let source_boost_changed_top = pre_boost_top != post_boost_top;
+
+    // Inter-agent ACL filter (P1#7). Only applies when a requesting actor
+    // is named — the agent sees its own + system + explicitly-granted
+    // memories. Without `?actor=`, behaviour is unchanged.
+    let hybrid_hits: Vec<Hit> = match &params.actor {
+        Some(actor) => hybrid_hits
+            .into_iter()
+            .filter(|h| state.acl.can_read_memory(actor, h.memory))
+            .collect(),
+        None => hybrid_hits,
+    };
 
     // Compose the answer card. The synthesizer trusts the (now boosted)
     // hybrid order; we just resolve each hit's content from the snapshot
@@ -779,6 +798,40 @@ pub struct ProfileHistoryDto {
     pub value: String,
     pub set_at_ms: u64,
     pub actor: Option<String>,
+}
+
+/// `GET /api/agents` — multi-agent attribution + the inter-agent grant
+/// matrix for the default tenant. Shows which agent owns how many
+/// memories and who it has granted read access to (P1#7).
+pub async fn agents(State(state): State<Arc<AppState>>) -> Response {
+    let rows: Vec<AgentDto> = state
+        .acl
+        .attribution(&state.default_tenant)
+        .into_iter()
+        .map(|a| AgentDto {
+            agent: a.agent,
+            memories: a.memories,
+            grants_to: a.grants_to,
+            is_system: a.is_system,
+        })
+        .collect();
+    no_cache(Json(AgentsResponse { agents: rows }).into_response())
+}
+
+#[derive(Serialize)]
+pub struct AgentsResponse {
+    pub agents: Vec<AgentDto>,
+}
+
+#[derive(Serialize)]
+pub struct AgentDto {
+    pub agent: String,
+    pub memories: u64,
+    /// Agents this agent has granted read access to.
+    pub grants_to: Vec<String>,
+    /// `true` for system owners (ingestion / demo / evolution-worker),
+    /// whose memories are readable by every agent.
+    pub is_system: bool,
 }
 
 /// `GET /api/ingest/metrics` — Phase-7 ingestion telemetry (extract +

@@ -19,6 +19,7 @@
 //! With `MNEME_DEMO=1` the server uses a fresh temp directory and spawns a
 //! background writer that drops a small themed memory story into the log.
 
+mod acl_worker;
 mod demo;
 mod demo_llm;
 mod demo_procedural;
@@ -36,8 +37,8 @@ use mneme_core::{Embedder, EventLog, LlmClient, MnemeError, Retriever};
 use mneme_evolve::EvolveConfig;
 use mneme_graph::FjallGraphView;
 use mneme_index::{
-    Bm25View, FastEmbedEmbedder, HybridRetriever, MockEmbedder, ProfileView, SnippetSynthesizer,
-    VectorView,
+    AgentAclView, Bm25View, FastEmbedEmbedder, HybridRetriever, MockEmbedder, ProfileView,
+    SnippetSynthesizer, VectorView,
 };
 use mneme_store::FjallEventLog;
 use std::net::SocketAddr;
@@ -100,6 +101,8 @@ async fn main() -> anyhow::Result<()> {
     // Phase-8 (P1#6) — profile / persona memory. In-memory, rebuilt from
     // the log's `ProfileSet` events each boot (Hard Rule #4).
     let profile = Arc::new(ProfileView::new());
+    // Phase-8 (P1#7) — multi-agent attribution + inter-agent ACL view.
+    let acl = Arc::new(AgentAclView::new());
 
     // Replay the log into the views — "indexes rebuild from the log".
     let entry_count = entries.len();
@@ -107,7 +110,12 @@ async fn main() -> anyhow::Result<()> {
         vector.apply(entry).await?;
         bm25.apply(entry).await?;
         profile.apply(entry).await?;
+        acl.apply(entry).await?;
     }
+    // Head id after boot replay — the ACL tail worker resumes here so it
+    // sees post-boot writes (ingestion/evolution) without re-counting what
+    // replay already absorbed.
+    let boot_head = entries.last().map(|e| e.id);
     tracing::info!(
         event_count = entry_count,
         data_dir = %data_dir.display(),
@@ -157,6 +165,10 @@ async fn main() -> anyhow::Result<()> {
     // Phase 4 — graph view tail worker. Keeps the persistent graph in
     // sync with the log as new events (demo writes, evolutions) land.
     graph_worker::spawn(log_trait.clone(), graph.clone());
+
+    // Phase 8 (P1#7) — ACL/attribution tail. Counts memory ownership +
+    // applies grant/revoke events from the head of the boot replay.
+    acl_worker::spawn(log_trait.clone(), acl.clone(), boot_head);
 
     // Phase 7 — ingestion worker. Tails ObservationRecorded events,
     // extracts atomic facts, and consolidates each into ADD / UPDATE /
@@ -287,6 +299,7 @@ async fn main() -> anyhow::Result<()> {
         procedural_store,
         ingestion: ingestion_worker,
         profile,
+        acl,
         default_tenant: DEMO_TENANT.into(),
     });
     let app = Router::new()
@@ -300,6 +313,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/procedural/metrics", get(viz::procedural_metrics))
         .route("/api/ingest/metrics", get(viz::ingest_metrics))
         .route("/api/profile", get(viz::profile))
+        .route("/api/agents", get(viz::agents))
         .route("/api/graph", get(viz::graph))
         .route("/static/chart.umd.min.js", get(viz::chart_js))
         .with_state(state);
