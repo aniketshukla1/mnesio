@@ -6,7 +6,7 @@
     <a href="https://github.com/aniketshukla1/mneme/actions"><img alt="Build Status" src="https://img.shields.io/badge/build-passing-brightgreen"></a>
     <a href="https://crates.io/crates/mneme"><img alt="Version" src="https://img.shields.io/badge/version-v0.1.0-blue"></a>
     <a href="https://github.com/aniketshukla1/mneme/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
-    <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-384%20passing-brightgreen"></a>
+    <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-380%20passing-brightgreen"></a>
   </p>
 </div>
 
@@ -31,7 +31,7 @@ Two continuous loops operate over a single append-only event log:
 git clone https://github.com/aniketshukla1/mneme.git
 cd mneme
 
-# Run the workspace tests (384 passing)
+# Run the workspace tests (380 passing)
 cargo test --workspace
 
 # Boot the demo: live retrieval + memory evolution + procedural compiler
@@ -360,19 +360,20 @@ The dashboard renders this as a dual-line chart with a `safety 100%` pill that f
 
 ```
 mneme-core        :   3 tests
-mneme-llm         :  27 tests
-mneme-index       :  74 tests
-mneme-evolve      :  11 tests
-mneme-procedural  : 102 unit + 5 integration tests
+mneme-llm         :  11 tests
+mneme-index       :  80 tests
+mneme-evolve      :  27 tests
+mneme-procedural  : 107 tests
 mneme-bench       :  12 tests
-mneme-mcp         :  24 unit + 2 integration tests
+mneme-mcp         :  26 tests (unit + integration)
 mneme-py          :   7 tests (Rust-side inner-client coverage)
-mneme-server      :  26 tests
+mneme-server      :  27 tests
 mneme-store       :   1 test
 mneme-graph       :  27 tests
 mneme-extract     :  33 tests
+mneme-privacy     :  19 tests
 ──────────────────────────────
-TOTAL             : 360 tests · all passing on both default and --no-default-features
+TOTAL             : 380 tests (377 on --no-default-features) · all passing
 ```
 
 ---
@@ -406,7 +407,7 @@ References embedded in the code:
 
 ## ⚠️ Stability
 
-This is `0.1.0` — the first usable release. The system is end-to-end working with 384 passing tests across all six build phases, but the public API surface will still move as the graph store and procedural compiler gain real-world mileage. Pin a specific version in your `Cargo.toml`; expect breaking changes between `0.x.y` bumps.
+This is `0.1.0` — the first usable release. The system is end-to-end working with 380 passing tests across all six build phases, but the public API surface will still move as the graph store and procedural compiler gain real-world mileage. Pin a specific version in your `Cargo.toml`; expect breaking changes between `0.x.y` bumps.
 
 ---
 
