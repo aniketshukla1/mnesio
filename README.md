@@ -77,6 +77,7 @@ Twelve crates, each with a focused responsibility. External dependencies sit beh
 | `mneme-server` | Host process: HTTP API, dashboard, demo wiring | ✅ |
 | `mneme-mcp` | MCP server: exposes mneme as tools to Claude Desktop / Cline / any MCP client | ✅ Phase 5 |
 | `mneme-py` | Python bindings via pyo3 — pip-installable | ✅ Phase 5 |
+| `sdk/node` | TypeScript/Node SDK over the HTTP surface — zero runtime deps | ✅ Phase 9 |
 
 ---
 
@@ -254,6 +255,46 @@ The current API is **synchronous** — each call blocks until complete. Agent-ca
 
 ---
 
+## 🟦 Using mneme from Node / TypeScript
+
+`sdk/node` ships a tiny client over the HTTP surface — zero runtime
+dependencies (it uses Node 18+ built-in `fetch`). Mirrors the DTOs from
+`mneme-server` 1:1 with full TypeScript types.
+
+```ts
+import { MnemeClient } from "@mneme/sdk";
+
+const mneme = new MnemeClient({ baseUrl: "http://127.0.0.1:7777" });
+
+// One round-trip: post-gate PolicyArtifacts + hybrid retrieval.
+const { skills, hits } = await mneme.retrieveWithSkills(
+  "what did our last call decide about pricing?",
+  5,
+  { actor: "analyst" }, // optional — enforces inter-agent ACL
+);
+
+const system =
+  skills.map(s => s.injection).join("\n\n") +
+  "\n\nContext:\n" +
+  hits.map(h => `- ${h.content}`).join("\n");
+```
+
+Every returned `skills[i]` has cleared the mechanical safety gate
+(canaries 100%, safety probe passing, objective Δ ≥ 0) — drop the
+`injection` straight into your prompt.
+
+The same client wraps cleanly into LangChain `BaseRetriever`,
+LlamaIndex `BaseRetriever`, and CrewAI `Tool`. See `sdk/node/README.md`
+for adapter sketches.
+
+```bash
+cd sdk/node
+npm install
+npm run build && npm test     # 8 tests, no server required
+```
+
+---
+
 ## 🔌 Using mneme from Claude Desktop (MCP)
 
 The `mneme-mcp` binary speaks the [Model Context Protocol](https://modelcontextprotocol.io). Add it to your Claude Desktop config and three tools become available in any conversation:
@@ -372,8 +413,9 @@ mneme-store       :   1 test
 mneme-graph       :  27 tests
 mneme-extract     :  33 tests
 mneme-privacy     :  19 tests
+sdk/node (TS)     :   8 tests (offline, stub fetch)
 ──────────────────────────────
-TOTAL             : 380 tests (377 on --no-default-features) · all passing
+TOTAL             : 380 Rust tests (377 on --no-default-features) + 8 SDK tests · all passing
 ```
 
 ---

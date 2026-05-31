@@ -9,3 +9,8 @@ Cargo.lock
 mneme-project-brief.docx
 mneme-project-brief.txt
 CLAUDE.md
+
+# Node SDK build artifacts
+sdk/node/node_modules/
+sdk/node/dist/
+sdk/node/package-lock.json

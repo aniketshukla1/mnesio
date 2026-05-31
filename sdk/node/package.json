@@ -1,0 +1,46 @@
+{
+  "name": "@mneme/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for mneme — self-improving long-term memory for AI agents.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test dist/test.js",
+    "prepare": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.41",
+    "typescript": "5.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aniketshukla1/mneme.git",
+    "directory": "sdk/node"
+  },
+  "keywords": [
+    "mneme",
+    "memory",
+    "agents",
+    "llm",
+    "rag",
+    "ai",
+    "sdk"
+  ]
+}
