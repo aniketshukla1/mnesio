@@ -6,7 +6,7 @@
     <a href="https://github.com/aniketshukla1/mneme/actions"><img alt="Build Status" src="https://img.shields.io/badge/build-passing-brightgreen"></a>
     <a href="https://crates.io/crates/mneme"><img alt="Version" src="https://img.shields.io/badge/version-v0.1.0-blue"></a>
     <a href="https://github.com/aniketshukla1/mneme/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
-    <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-360%20passing-brightgreen"></a>
+    <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-384%20passing-brightgreen"></a>
   </p>
 </div>
 
@@ -31,7 +31,7 @@ Two continuous loops operate over a single append-only event log:
 git clone https://github.com/aniketshukla1/mneme.git
 cd mneme
 
-# Run the workspace tests (360 passing)
+# Run the workspace tests (384 passing)
 cargo test --workspace
 
 # Boot the demo: live retrieval + memory evolution + procedural compiler
@@ -60,7 +60,7 @@ In the demo, watch the **PROCEDURAL** section's learning curve climb from ~33% t
 
 ## 🏗️ Workspace architecture
 
-Eleven crates, each with a focused responsibility. External dependencies sit behind traits (`LlmClient`, `Embedder`, `EventLog`, `MaterializedView`, `Retriever`, `Synthesizer`, `PolicyExecutor`, `Judge`) so providers are swappable.
+Twelve crates, each with a focused responsibility. External dependencies sit behind traits (`LlmClient`, `Embedder`, `EventLog`, `MaterializedView`, `Retriever`, `Synthesizer`, `PolicyExecutor`, `Judge`) so providers are swappable.
 
 | Crate | Role | Status |
 |---|---|---|
@@ -69,6 +69,7 @@ Eleven crates, each with a focused responsibility. External dependencies sit beh
 | `mneme-index` | `hnsw_rs` vector + `tantivy` BM25 + RRF hybrid + extractive synthesis | ✅ Phase 0 |
 | `mneme-graph` | Bi-temporal property graph store on `fjall` — nodes, edges, BFS, `as_of` queries | ✅ Phase 4 |
 | `mneme-extract` | Ingestion intelligence — fact extraction, ADD/UPDATE/NOOP consolidation, importance admission + decay | ✅ Phase 7 |
+| `mneme-privacy` | PII redaction (minimisation) + crypto-shred keyring (right-to-be-forgotten on an append-only log) | ✅ Phase 8 |
 | `mneme-llm` | `LlmClient` implementations: `FakeLlmClient`, `OllamaLlmClient` (feature-gated) | ✅ |
 | `mneme-evolve` | Bounded A-MEM-style memory evolution worker | ✅ Phase 1 |
 | `mneme-procedural` | GEPA-style procedural compiler + gate + eval suite + learning curve | ✅ Phase 2 |
@@ -405,7 +406,7 @@ References embedded in the code:
 
 ## ⚠️ Stability
 
-This is `0.1.0` — the first usable release. The system is end-to-end working with 360 passing tests across all six build phases, but the public API surface will still move as the graph store and procedural compiler gain real-world mileage. Pin a specific version in your `Cargo.toml`; expect breaking changes between `0.x.y` bumps.
+This is `0.1.0` — the first usable release. The system is end-to-end working with 384 passing tests across all six build phases, but the public API surface will still move as the graph store and procedural compiler gain real-world mileage. Pin a specific version in your `Cargo.toml`; expect breaking changes between `0.x.y` bumps.
 
 ---
 

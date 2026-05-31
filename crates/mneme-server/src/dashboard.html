@@ -460,6 +460,11 @@
           <div class="value"><span id="ingest-noops">—</span></div>
           <div class="sub">NOOP — already known</div>
         </div>
+        <div class="kpi">
+          <div class="label">PII redacted</div>
+          <div class="value"><span id="ingest-pii">—</span></div>
+          <div class="sub">spans masked pre-storage (P1#8)</div>
+        </div>
       </div>
     </div>
 
@@ -1100,6 +1105,7 @@
         document.getElementById('ingest-contradictions').textContent = m.contradictions ?? 0;
         document.getElementById('ingest-refinements').textContent = m.refinements ?? 0;
         document.getElementById('ingest-noops').textContent = m.noops ?? 0;
+        document.getElementById('ingest-pii').textContent = m.pii_redacted ?? 0;
       } catch (err) {
         console.warn('ingest metrics fetch failed', err);
       }

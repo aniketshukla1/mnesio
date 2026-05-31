@@ -27,6 +27,7 @@ use mneme_extract::{
     AdmissionPolicy, ConsolidationAction, Consolidator, ExistingMemory, LlmExtractor, UpdateReason,
 };
 use mneme_index::{Bm25View, VectorView};
+use mneme_privacy::{Redactor, RegexlessRedactor};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -43,6 +44,8 @@ pub struct IngestMetrics {
     pub contradictions: u64,
     pub refinements: u64,
     pub noops: u64,
+    /// PII spans redacted from observation text before extraction (P1#8).
+    pub pii_redacted: u64,
 }
 
 /// How many candidate memories to pull from the retriever per fact.
@@ -55,6 +58,10 @@ pub struct IngestionWorker {
     bm25: Arc<Bm25View>,
     consolidator: Consolidator<LlmExtractor>,
     admission: AdmissionPolicy,
+    /// PII redactor applied to raw observation text before extraction, so
+    /// identifiers never reach the extracted memories or the log's derived
+    /// state (P1#8 — minimisation).
+    redactor: RegexlessRedactor,
     /// id → (content, scope) cache, for resolving retriever hits to
     /// candidate content and reading an UPDATE target's scope.
     cache: RwLock<HashMap<MemoryRef, (String, Scope)>>,
@@ -78,6 +85,7 @@ impl IngestionWorker {
             bm25,
             consolidator,
             admission: AdmissionPolicy::default(),
+            redactor: RegexlessRedactor::new(),
             cache: RwLock::new(HashMap::new()),
             metrics: RwLock::new(IngestMetrics::default()),
             poll_interval: Duration::from_millis(300),
@@ -108,7 +116,7 @@ impl IngestionWorker {
     /// No-ops for everything except `ObservationRecorded`.
     pub async fn process(&self, entry: &LogEntry) -> Result<(), MnemeError> {
         self.absorb(entry).await;
-        let (scope, content, actor) = match &entry.event {
+        let (scope, raw_content, actor) = match &entry.event {
             Event::ObservationRecorded {
                 scope,
                 content,
@@ -116,6 +124,20 @@ impl IngestionWorker {
             } => (scope.clone(), content.clone(), actor.clone()),
             _ => return Ok(()),
         };
+
+        // P1#8 — redact PII from the raw turn *before* extraction, so no
+        // identifier reaches the extracted facts, the memories, or any
+        // derived view. The raw ObservationRecorded already landed on the
+        // fast write path; future work can seal that with the keyring.
+        let report = self.redactor.redact(&raw_content);
+        if report.changed() {
+            self.metrics.write().await.pii_redacted += report.total() as u64;
+            tracing::debug!(
+                spans = report.total(),
+                "ingestion: redacted PII from observation"
+            );
+        }
+        let content = report.redacted;
 
         // Fetch candidate memories via the retriever, resolve to content.
         let candidates = self.fetch_candidates(&content, &scope).await;
@@ -494,6 +516,47 @@ mod tests {
         let m = worker.metrics().await;
         assert_eq!(m.adds_committed, 0);
         assert_eq!(m.adds_rejected, 1, "trivial fact rejected by admission");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn pii_is_redacted_before_extraction() {
+        // The observation carries an email; the redactor must mask it
+        // before the extractor sees it, so the email never reaches the
+        // extracted fact, the stored memory, or the BM25 index. We capture
+        // what the extractor was asked to summarise via the LLM call log.
+        let dir = temp_dir();
+        let log: Arc<dyn EventLog> = FjallEventLog::open(&dir).unwrap();
+        let vector = Arc::new(VectorView::new(4, "test"));
+        let bm25 = Arc::new(Bm25View::new().unwrap());
+        let llm = Arc::new(
+            FakeLlmClient::new()
+                .with_prefix_match("Extract the durable", "FACT: a contact was shared")
+                .with_default("DECISION: ADD"),
+        );
+        let retr = Arc::new(FakeRetriever {
+            hits: std::sync::Mutex::new(vec![]),
+        });
+        let worker = IngestionWorker::new(log.clone(), retr, vector, bm25, llm.clone());
+        let e = observe(&log, "reach me at alice@example.com anytime").await;
+        worker.process(&e).await.unwrap();
+
+        // Metric incremented.
+        let m = worker.metrics().await;
+        assert_eq!(m.pii_redacted, 1, "one email span should be redacted");
+
+        // The extraction prompt the LLM received must contain the
+        // placeholder, never the raw email.
+        let saw_email = llm
+            .call_log()
+            .iter()
+            .any(|p| p.contains("alice@example.com"));
+        let saw_placeholder = llm.call_log().iter().any(|p| p.contains("[EMAIL]"));
+        assert!(!saw_email, "raw email must not reach the extractor");
+        assert!(
+            saw_placeholder,
+            "redacted placeholder should reach the extractor"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -6,6 +6,7 @@ members = [
     "crates/mneme-index",
     "crates/mneme-graph",
     "crates/mneme-extract",
+    "crates/mneme-privacy",
     "crates/mneme-llm",
     "crates/mneme-evolve",
     "crates/mneme-procedural",
@@ -29,6 +30,7 @@ mneme-store = { path = "crates/mneme-store" }
 mneme-index = { path = "crates/mneme-index" }
 mneme-graph = { path = "crates/mneme-graph" }
 mneme-extract = { path = "crates/mneme-extract" }
+mneme-privacy = { path = "crates/mneme-privacy" }
 mneme-llm = { path = "crates/mneme-llm", default-features = false }
 mneme-evolve = { path = "crates/mneme-evolve" }
 mneme-procedural = { path = "crates/mneme-procedural" }

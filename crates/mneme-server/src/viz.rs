@@ -851,6 +851,7 @@ pub async fn ingest_metrics(State(state): State<Arc<AppState>>) -> Response {
                 contradictions: m.contradictions,
                 refinements: m.refinements,
                 noops: m.noops,
+                pii_redacted: m.pii_redacted,
             }
         }
         None => IngestMetricsResponse {
@@ -882,6 +883,8 @@ pub struct IngestMetricsResponse {
     pub refinements: u64,
     /// Facts dropped as duplicates (NOOP).
     pub noops: u64,
+    /// PII spans redacted from observation text before storage (P1#8).
+    pub pii_redacted: u64,
 }
 
 #[derive(Serialize, Default)]

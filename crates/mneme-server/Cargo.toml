@@ -23,6 +23,7 @@ mneme-store.workspace = true
 mneme-index.workspace = true
 mneme-graph.workspace = true
 mneme-extract.workspace = true
+mneme-privacy.workspace = true
 mneme-evolve.workspace = true
 mneme-llm = { workspace = true, default-features = false }
 mneme-procedural.workspace = true
