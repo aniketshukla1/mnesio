@@ -14,3 +14,4 @@ CLAUDE.md
 sdk/node/node_modules/
 sdk/node/dist/
 sdk/node/package-lock.json
+sdk/node/.last_build_hash
