@@ -6,7 +6,7 @@
     <a href="https://github.com/aniketshukla1/mneme/actions"><img alt="Build Status" src="https://img.shields.io/badge/build-passing-brightgreen"></a>
     <a href="https://crates.io/crates/mneme"><img alt="Version" src="https://img.shields.io/badge/version-v0.1.0-blue"></a>
     <a href="https://github.com/aniketshukla1/mneme/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
-    <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-354%20passing-brightgreen"></a>
+    <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-360%20passing-brightgreen"></a>
   </p>
 </div>
 
@@ -31,7 +31,7 @@ Two continuous loops operate over a single append-only event log:
 git clone https://github.com/aniketshukla1/mneme.git
 cd mneme
 
-# Run the workspace tests (354 passing)
+# Run the workspace tests (360 passing)
 cargo test --workspace
 
 # Boot the demo: live retrieval + memory evolution + procedural compiler
@@ -371,7 +371,7 @@ mneme-store       :   1 test
 mneme-graph       :  27 tests
 mneme-extract     :  33 tests
 ──────────────────────────────
-TOTAL             : 354 tests · all passing on both default and --no-default-features
+TOTAL             : 360 tests · all passing on both default and --no-default-features
 ```
 
 ---
@@ -405,7 +405,7 @@ References embedded in the code:
 
 ## ⚠️ Stability
 
-This is `0.1.0` — the first usable release. The system is end-to-end working with 354 passing tests across all six build phases, but the public API surface will still move as the graph store and procedural compiler gain real-world mileage. Pin a specific version in your `Cargo.toml`; expect breaking changes between `0.x.y` bumps.
+This is `0.1.0` — the first usable release. The system is end-to-end working with 360 passing tests across all six build phases, but the public API surface will still move as the graph store and procedural compiler gain real-world mileage. Pin a specific version in your `Cargo.toml`; expect breaking changes between `0.x.y` bumps.
 
 ---
 
