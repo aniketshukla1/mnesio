@@ -834,6 +834,93 @@ pub struct AgentDto {
     pub is_system: bool,
 }
 
+/// `GET /api/skills` — Phase-9 (P2#9) **skill retrieval for injection**.
+///
+/// The procedural compiler already commits versioned `PolicyArtifact`s
+/// behind the safety gate (Hard Rule #1); this endpoint surfaces the
+/// **active** versions an agent should fold into its prompt at query
+/// time. That's the wedge made operational: every call uses the
+/// gated-improved skill, never an ungated rewrite — cross-task skill
+/// reuse with the regression guard competitors lack.
+///
+/// Scope-filtered exactly (Hard Rule #3) via the default tenant.
+pub async fn skills(State(state): State<Arc<AppState>>) -> Response {
+    let scope = Scope::global(state.default_tenant.clone());
+    let artifacts = state.procedural_store.all_in_scope(&scope).await;
+    let injectable: Vec<InjectableSkillDto> = artifacts.iter().map(skill_dto).collect();
+    let payload = SkillsResponse {
+        tenant: scope.tenant,
+        count: injectable.len(),
+        skills: injectable,
+    };
+    no_cache(Json(payload).into_response())
+}
+
+#[derive(Serialize)]
+pub struct SkillsResponse {
+    pub tenant: String,
+    pub count: usize,
+    pub skills: Vec<InjectableSkillDto>,
+}
+
+/// One artifact reduced to what a thin client needs to *inject* into a
+/// prompt — the bytes it should paste in, plus enough provenance (id,
+/// version, kind) to log which skill drove the call.
+#[derive(Serialize)]
+pub struct InjectableSkillDto {
+    pub artifact_id: String,
+    pub version: u32,
+    pub kind: &'static str,
+    /// Plain-text content the client should prepend / append to its
+    /// prompt. The shape depends on `kind`:
+    /// - SystemPrompt → the body verbatim;
+    /// - Heuristic → `"If <when>, then <then>"`;
+    /// - Skill → `"<signature>\n<body>"` (lang surfaced separately);
+    /// - RetrievalRule → `"<query_pattern> → <rewrite>"`;
+    /// - Reflection → the bare `lesson`.
+    pub injection: String,
+    /// `Some(lang)` only for `Skill` artifacts (e.g. `"python"`); the
+    /// client may need it to fence the body correctly.
+    pub lang: Option<String>,
+    pub canary_count: usize,
+}
+
+fn skill_dto(a: &mneme_core::entity::PolicyArtifact) -> InjectableSkillDto {
+    let (kind, injection, lang) = match &a.kind {
+        mneme_core::entity::ArtifactKind::SystemPrompt { body } => {
+            ("SystemPrompt", body.clone(), None)
+        }
+        mneme_core::entity::ArtifactKind::Heuristic { when, then } => {
+            ("Heuristic", format!("If {when}, then {then}"), None)
+        }
+        mneme_core::entity::ArtifactKind::Skill {
+            signature,
+            body,
+            lang,
+            ..
+        } => ("Skill", format!("{signature}\n{body}"), Some(lang.clone())),
+        mneme_core::entity::ArtifactKind::RetrievalRule {
+            query_pattern,
+            rewrite,
+        } => (
+            "RetrievalRule",
+            format!("{query_pattern} → {rewrite}"),
+            None,
+        ),
+        mneme_core::entity::ArtifactKind::Reflection { lesson, .. } => {
+            ("Reflection", lesson.clone(), None)
+        }
+    };
+    InjectableSkillDto {
+        artifact_id: a.id.to_string(),
+        version: a.version,
+        kind,
+        injection,
+        lang,
+        canary_count: a.canaries.len(),
+    }
+}
+
 /// `GET /api/ingest/metrics` — Phase-7 ingestion telemetry (extract +
 /// consolidate). Reports `enabled=false` when the worker isn't running.
 pub async fn ingest_metrics(State(state): State<Arc<AppState>>) -> Response {

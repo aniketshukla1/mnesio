@@ -314,6 +314,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/ingest/metrics", get(viz::ingest_metrics))
         .route("/api/profile", get(viz::profile))
         .route("/api/agents", get(viz::agents))
+        .route("/api/skills", get(viz::skills))
         .route("/api/graph", get(viz::graph))
         .route("/static/chart.umd.min.js", get(viz::chart_js))
         .with_state(state);
