@@ -12,8 +12,9 @@ graph but no procedural learning; Hindsight reflects but doesn't gate.
 
 The wedge wins the *vision*. What loses the *demo* is missing table-stakes:
 ingestion-time fact extraction, contradiction resolution, standard benchmark
-numbers, and the personalization / multi-agent / privacy basics. This doc is
-the plan to close those while leaning into the moat.
+numbers, and the personalization / multi-agent / privacy basics. P0–P2 below
+close those while leaning into the moat (all shipped). **P3 — frontier bets**
+is the layer past parity: six things only mneme's substrate can ship safely.
 
 ## Where mneme already stands
 
@@ -29,6 +30,9 @@ the plan to close those while leaning into the moat.
 | Rust / single-binary / local-first | — | ✅ differentiated |
 
 ## Gaps → roadmap (Phases 7–9)
+
+**Status: P0–P2 all shipped** (Phases 7–9 complete). The frontier layer (P3,
+Phases 10+) is specced below and in `CLAUDE.md`.
 
 ### P0 — table stakes
 1. **Ingestion extraction + consolidation** (`mneme-extract`): raw turn →
@@ -51,6 +55,26 @@ the plan to close those while leaning into the moat.
 9. **Skill reuse at inference**: retrieve committed `PolicyArtifact::Skill`
    and inject — cross-task skill reuse *with* the safety gate competitors lack.
 10. **Distribution/DX**: Node/TS SDK + LangChain/LlamaIndex/CrewAI adapters.
+
+## P3 — frontier bets (nobody else can ship these)
+
+P0–P2 reached parity-plus-wedge. P3 is the *unique* layer: bets that are only
+possible — or only *safe* — because mneme's system of record is an append-only,
+replayable, bi-temporal log behind a non-bypassable safety gate. The honest
+column is "why a competitor can't follow without rebuilding their foundation".
+Sequenced execution lives in `CLAUDE.md` → "Frontier roadmap (Phase 10+)".
+
+Thesis: **mneme is not a place to put facts — it's a memory that gets
+*verifiably* better, can *prove* what it knew and when, and can *take it back*.**
+
+| Bet (phase) | What it is | Why a storage-shaped competitor can't follow |
+|---|---|---|
+| **Causal memory / counterfactual GC** (10) | Replay outcomes with a memory masked → measure its causal contribution; GC by *provable* zero-contribution, not age. | Mem0/Zep/Letta mutate a DB in place — there's no past to replay, so they can only decay by heuristic. |
+| **Self-falsifying memory ("memory with CI")** (11) | Memories carry re-checkable probes; a failed probe auto-supersedes the belief (history kept) + re-triggers evolution; retrieval returns belief + confidence + why. | Needs an eval substrate wired into writes *and* invalidate-and-supersede versioning. Overwrite-in-place systems have no falsification chain to show. |
+| **Gated KV cartridges** (12, moonshot) | KV cache as a materialized view of the log — GEPA-compiled, gate-activated, crypto-shred-reconciled by recompile. KV-cache memory *minus* the reasons it's never productized. | A tensor blob is unauditable/un-erasable unless the *log*, not the blob, is the truth (Hard Rule #4). Prompt-caching vendors get latency only — never gated, versioned, *forgettable* KV. |
+| **Certified skill exchange** (13) | Export a gated `PolicyArtifact` as a certificate (artifact + canaries + `EvalReport`); the importer re-runs *its own* gate before activation. Marketplace w/ network effects. | Nobody else has a gated unit of competence to certify; without `is_committable()` an imported "skill" is unverified text. |
+| **Negative memory + dreaming** (14) | Learn gated *suppression* rules from bad outcomes (what *not* to retrieve) + a bounded offline "dream" pass that consolidates, prunes by Phase-10 contribution, re-anchors evolved notes. | Both are compiler extensions behind the gate; a system with no outcome loop can only ever store the positive. |
+| **Regulator-grade provenance (black-box recorder)** (15) | Time-travel reconstruction ("what did the agent know at T") + provenance chains + verifiable erasure coexisting with an immutable log. Placeable under EU-AI-Act-style audit. | Mutable storage can't reconstruct a past state it overwrote, and can't prove erasure against a log it doesn't keep. |
 
 ## Positioning
 
