@@ -656,22 +656,25 @@ mod tests {
         // first K*4 HNSW pull may be mostly noise, the adaptive loop
         // doubles `over_k` until 5 in-scope hits are found.
         //
-        // Target vectors are slightly jittered so HNSW's graph
-        // construction doesn't collapse them onto a single node — that
-        // collapse is a property of the approximate index, not of the
-        // adaptive filter logic we want to verify here.
+        // Target vectors are spread along the 3rd axis (which both the query
+        // and the noise vectors hold at 0). This keeps every target far
+        // closer to the query `[1,0,0,0]` than any noise vector — noise sits
+        // on the 4th axis at 1.0, so its distance to the query is ≥ ~1.3,
+        // while the targets span only 0.0..0.4 — yet spaces the targets
+        // ~0.1 apart so HNSW indexes them as distinct, reachable nodes. The
+        // earlier near-duplicate jitter (≤ 0.002) could collapse targets onto
+        // one graph node, making the approximate index occasionally drop a
+        // target and the assertion flaky. Clear separation makes the top-5
+        // unambiguous so this test exercises the adaptive filter logic, not
+        // HNSW recall on near-duplicates.
         let view = VectorView::new(4, "test-v1");
         let scope_noise = Scope::global("noise");
         let scope_target = Scope::global("target");
         add_filler(&view, &scope_noise, 20).await;
 
         for i in 0..5 {
-            let jitter = i as f32 * 0.0005;
-            let m = mem_with(
-                "target",
-                scope_target.clone(),
-                vec![1.0 - jitter, jitter, 0.0, 0.0],
-            );
+            let sep = i as f32 * 0.1;
+            let m = mem_with("target", scope_target.clone(), vec![1.0, 0.0, sep, 0.0]);
             view.apply(&entry(Event::MemoryWritten(m))).await.unwrap();
         }
 
