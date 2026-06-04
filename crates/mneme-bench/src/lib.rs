@@ -33,6 +33,7 @@ use mneme_procedural::{
 // pulling `mneme-procedural` directly.
 pub use mneme_procedural::PolicyExecutor;
 
+pub mod gen;
 pub mod memeval;
 pub mod report;
 use serde::Deserialize;
