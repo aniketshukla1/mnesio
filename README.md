@@ -78,6 +78,7 @@ Twelve crates, each with a focused responsibility. External dependencies sit beh
 | `mneme-kv` | Gated KV cartridges — KV cache as a versioned, gated, erasable view of the log (tensor backend simulated; reconciliations real) | ◑ Phase 12 |
 | `mneme-exchange` | Certified skill exchange — export a gated artifact as a signed certificate; the importer re-runs its own gate before activation | ✅ Phase 13 |
 | `mneme-dream` | Negative memory + dreaming — gated suppression rules from bad outcomes; bounded offline prune-by-contribution + re-anchor drifted notes | ✅ Phase 14 |
+| `mneme-provenance` | Regulator-grade provenance — time-travel reconstruction + provenance chains + verifiable erasure over the append-only log | ✅ Phase 15 |
 | `mneme-bench` | Eval-as-product harness — procedural learning curve (GSM8K/HumanEval) + memory recall@k (LOCOMO/LongMemEval) | ✅ Phase 2/6 |
 | `mneme-server` | Host process: HTTP API, dashboard, demo wiring | ✅ |
 | `mneme-mcp` | MCP server: exposes mneme as tools to Claude Desktop / Cline / any MCP client | ✅ Phase 5 |
@@ -400,6 +401,23 @@ The dashboard renders this as a dual-line chart with a `safety 100%` pill that f
 - **Phase 5** ✅ Distribution — MCP server + Python (`pyo3`) bindings, both reachable from any agent framework
 - **Phase 6** ✅ Eval harness as a first-class product (the real moat) — `mneme-bench` run/compare CLI, self-contained HTML reports, CI regression gates with exit-code semantics
 
+### Competitive layer (parity-plus-wedge)
+
+- **Phase 7** ✅ Ingestion intelligence — extract atomic facts → consolidate ADD / UPDATE(contradiction|refinement) / NOOP, importance admission + decay (`mneme-extract`)
+- **Phase 8** ✅ Retrieval + personalization + privacy — graph/recency fusion + reranker, profile memory, multi-agent ACLs, PII redaction + crypto-shred forget (`mneme-privacy`)
+- **Phase 9** ✅ Skill reuse + distribution — committed-artifact injection at query time, Node/TS SDK (`sdk/node`)
+
+### Frontier layer (the bets no one else can ship)
+
+- **Phase 10** ✅ Causal memory — counterfactual contribution scoring + GC by measurement (`mneme-causal`)
+- **Phase 11** ✅ Self-falsifying memory — acceptance probes + belief calibration; a refuted claim auto-supersedes (`mneme-probe`)
+- **Phase 12** ◑ Gated KV cartridges — KV cache as a versioned, gated, erasable view of the log; substrate done, real tensor backend behind the `KvBackend` trait remaining (`mneme-kv`)
+- **Phase 13** ✅ Certified skill exchange — signed certificate; importer re-runs its own gate before activation (`mneme-exchange`)
+- **Phase 14** ✅ Negative memory + dreaming — gated suppression rules + bounded offline prune-by-contribution & re-anchor (`mneme-dream`)
+- **Phase 15** ✅ Regulator-grade provenance — time-travel reconstruction + provenance chains + verifiable erasure (`mneme-provenance`)
+
+The frontier layer (10–15) is what a storage-shaped competitor (Mem0, Zep, Letta, Cognee, A-MEM) can't follow without rebuilding its foundation — each bet exploits the append-only + replayable + bi-temporal log behind the non-bypassable safety gate. See `COMPETITIVE.md` → "P3 — frontier bets".
+
 ---
 
 ## 🧪 Test counts
@@ -415,6 +433,7 @@ mneme-probe       :  14 tests
 mneme-kv          :  10 tests
 mneme-exchange    :  11 tests
 mneme-dream       :  10 tests
+mneme-provenance  :   7 tests
 mneme-bench       :  12 tests
 mneme-mcp         :  26 tests (unit + integration)
 mneme-py          :   7 tests (Rust-side inner-client coverage)
@@ -425,7 +444,7 @@ mneme-extract     :  33 tests
 mneme-privacy     :  19 tests
 sdk/node (TS)     :   8 tests (offline, stub fetch)
 ──────────────────────────────
-TOTAL             : 440 Rust tests (437 on --no-default-features) + 8 SDK tests · all passing
+TOTAL             : 447 Rust tests (444 on --no-default-features) + 8 SDK tests · all passing
 ```
 
 ---
