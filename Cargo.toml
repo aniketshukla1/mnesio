@@ -13,6 +13,7 @@ members = [
     "crates/mneme-causal",
     "crates/mneme-probe",
     "crates/mneme-kv",
+    "crates/mneme-exchange",
     "crates/mneme-server",
     "crates/mneme-bench",
     "crates/mneme-mcp",
@@ -40,6 +41,7 @@ mneme-procedural = { path = "crates/mneme-procedural" }
 mneme-causal = { path = "crates/mneme-causal" }
 mneme-probe = { path = "crates/mneme-probe" }
 mneme-kv = { path = "crates/mneme-kv" }
+mneme-exchange = { path = "crates/mneme-exchange" }
 mneme-bench = { path = "crates/mneme-bench" }
 mneme-mcp = { path = "crates/mneme-mcp" }
 mneme-py = { path = "crates/mneme-py" }
