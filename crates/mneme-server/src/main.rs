@@ -24,6 +24,7 @@ mod causal;
 mod demo;
 mod demo_llm;
 mod demo_procedural;
+mod dream;
 mod embedding_worker;
 mod exchange;
 mod graph_worker;
@@ -324,6 +325,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/probe/metrics", get(probe::probe_metrics))
         .route("/api/kv/metrics", get(kv::kv_metrics))
         .route("/api/exchange/metrics", get(exchange::exchange_metrics))
+        .route("/api/dream/metrics", get(dream::dream_metrics))
         .route("/static/chart.umd.min.js", get(viz::chart_js))
         .with_state(state);
 

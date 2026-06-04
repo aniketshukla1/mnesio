@@ -1461,5 +1461,79 @@
     load();
   })();
   </script>
+
+  <!-- ===== Phase 14 · Negative memory + dreaming ===== -->
+  <section id="dream-panel" style="margin:28px auto;max-width:1100px;padding:20px 24px;border:1px solid #2a2f3a;border-radius:12px;background:#11141b;color:#e6e9ef;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <div>
+        <h2 style="margin:0;font-size:18px;">Phase 14 · Negative memory + dreaming</h2>
+        <div style="color:#9aa3b2;font-size:13px;margin-top:2px;">
+          <b>Anti-memory</b>: learn gated suppression rules from bad outcomes (what <em>not</em> to retrieve). <b>Dreaming</b>: a bounded offline pass that prunes by Phase-10 contribution and re-anchors drifted notes.
+        </div>
+      </div>
+      <button id="dream-refresh" style="background:#1f6feb;color:#fff;border:0;border-radius:7px;padding:8px 14px;font-size:13px;cursor:pointer;">Run pass</button>
+    </div>
+
+    <div id="dream-kpis" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:16px;"></div>
+    <div id="dream-halves" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px;"></div>
+    <div id="dream-note" style="color:#9aa3b2;font-size:12px;margin-top:14px;"></div>
+  </section>
+  <script>
+  (function () {
+    var fmtPct = function (x) { return (x * 100).toFixed(0) + "%"; };
+    function kpi(label, value, accent) {
+      return '<div style="flex:1;min-width:130px;background:#0c0e14;border:1px solid #232836;border-radius:9px;padding:12px 14px;">'
+        + '<div style="font-size:20px;font-weight:600;color:' + (accent || "#e6e9ef") + ';">' + value + '</div>'
+        + '<div style="font-size:12px;color:#9aa3b2;margin-top:2px;">' + label + '</div></div>';
+    }
+    function pill(ok, label) {
+      var c = ok ? "#3fb950" : "#f85149";
+      return '<div style="font-size:13px;color:' + c + ';margin:4px 0;">' + (ok ? "✓ " : "✗ ") + label + '</div>';
+    }
+    function list(items) {
+      if (!items || !items.length) return '<div style="font-size:12px;color:#6b7280;">(none)</div>';
+      return items.map(function (s) {
+        return '<div style="font-size:12px;color:#c8cfdc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">• ' + s + '</div>';
+      }).join("");
+    }
+    function render(d) {
+      var kpis = document.getElementById("dream-kpis");
+      var halves = document.getElementById("dream-halves");
+      var note = document.getElementById("dream-note");
+      if (!d.enabled) {
+        kpis.innerHTML = ""; halves.innerHTML = "";
+        note.textContent = d.note || "Dream pass unavailable.";
+        return;
+      }
+      kpis.innerHTML = kpi("live memories", d.live_memories)
+        + kpi("baseline recall", fmtPct(d.baseline_recall), "#58a6ff")
+        + kpi("pruned", d.pruned, "#d29922")
+        + kpi("next-gen lift", "+" + fmtPct(d.generation_delta), "#3fb950")
+        + kpi("re-anchored", d.reanchored + "/" + d.drifted_total)
+        + kpi("done-when", d.done_when ? "✓" : "✗", d.done_when ? "#3fb950" : "#f85149");
+      var anti = '<div style="background:#0c0e14;border:1px solid #232836;border-radius:9px;padding:14px 16px;">'
+        + '<div style="font-size:13px;font-weight:600;color:#c8cfdc;margin-bottom:8px;">Anti-memory — gated suppression (class “' + d.suppress_class + '”)</div>'
+        + pill(d.suppress_committed, "beneficial, canary-safe suppression → committed")
+        + pill(d.canary_breaker_rejected, "canary-breaking suppression → rejected by gate (Hard Rule #1)")
+        + '</div>';
+      var dream = '<div style="background:#0c0e14;border:1px solid #232836;border-radius:9px;padding:14px 16px;">'
+        + '<div style="font-size:13px;font-weight:600;color:#c8cfdc;margin-bottom:8px;">Dreaming — prune by contribution + re-anchor</div>'
+        + '<div style="font-size:12px;color:#9aa3b2;margin-bottom:4px;">pruned (dead/harmful weight):</div>' + list(d.prune_examples)
+        + '<div style="font-size:12px;color:#9aa3b2;margin:8px 0 4px;">re-anchored drifted notes:</div>' + list(d.reanchor_examples)
+        + '</div>';
+      halves.innerHTML = anti + dream;
+      note.textContent = "Read-only: the dream pass is only PLANNED here (nothing appended). A scheduled worker applies it — MemoryInvalidated per prune (invalidate, never delete), MemoryLinksUpdated per re-anchor. Suppressions + prunes stay behind the gate / Phase-10 contribution.";
+    }
+    function load() {
+      var note = document.getElementById("dream-note");
+      note.textContent = "Learning gated suppressions + planning a dream pass over the live corpus…";
+      fetch("/api/dream/metrics").then(function (r) { return r.json(); }).then(render).catch(function (e) {
+        note.textContent = "Dream pass failed: " + e;
+      });
+    }
+    document.getElementById("dream-refresh").addEventListener("click", load);
+    load();
+  })();
+  </script>
 </body>
 </html>

@@ -31,6 +31,7 @@ mneme-causal.workspace = true
 mneme-probe.workspace = true
 mneme-kv.workspace = true
 mneme-exchange.workspace = true
+mneme-dream.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
