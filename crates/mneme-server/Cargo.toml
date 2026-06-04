@@ -30,6 +30,7 @@ mneme-procedural.workspace = true
 mneme-causal.workspace = true
 mneme-probe.workspace = true
 mneme-kv.workspace = true
+mneme-exchange.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
