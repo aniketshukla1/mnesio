@@ -15,6 +15,7 @@ members = [
     "crates/mneme-kv",
     "crates/mneme-exchange",
     "crates/mneme-dream",
+    "crates/mneme-provenance",
     "crates/mneme-server",
     "crates/mneme-bench",
     "crates/mneme-mcp",
@@ -44,6 +45,7 @@ mneme-probe = { path = "crates/mneme-probe" }
 mneme-kv = { path = "crates/mneme-kv" }
 mneme-exchange = { path = "crates/mneme-exchange" }
 mneme-dream = { path = "crates/mneme-dream" }
+mneme-provenance = { path = "crates/mneme-provenance" }
 mneme-bench = { path = "crates/mneme-bench" }
 mneme-mcp = { path = "crates/mneme-mcp" }
 mneme-py = { path = "crates/mneme-py" }
