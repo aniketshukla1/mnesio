@@ -75,6 +75,7 @@ Twelve crates, each with a focused responsibility. External dependencies sit beh
 | `mneme-procedural` | GEPA-style procedural compiler + gate + eval suite + learning curve | ✅ Phase 2 |
 | `mneme-causal` | Counterfactual contribution scoring + GC by measurement (leave-one-out ablation over the replayable log) | ✅ Phase 10 |
 | `mneme-probe` | Self-falsifying memory — acceptance probes + belief calibration; a refuted claim invalidates-and-supersedes itself (history kept) | ✅ Phase 11 |
+| `mneme-kv` | Gated KV cartridges — KV cache as a versioned, gated, erasable view of the log (tensor backend simulated; reconciliations real) | ◑ Phase 12 |
 | `mneme-bench` | Eval-as-product harness — procedural learning curve (GSM8K/HumanEval) + memory recall@k (LOCOMO/LongMemEval) | ✅ Phase 2/6 |
 | `mneme-server` | Host process: HTTP API, dashboard, demo wiring | ✅ |
 | `mneme-mcp` | MCP server: exposes mneme as tools to Claude Desktop / Cline / any MCP client | ✅ Phase 5 |
@@ -409,6 +410,7 @@ mneme-evolve      :  27 tests
 mneme-procedural  : 107 tests
 mneme-causal      :  15 tests
 mneme-probe       :  14 tests
+mneme-kv          :  10 tests
 mneme-bench       :  12 tests
 mneme-mcp         :  26 tests (unit + integration)
 mneme-py          :   7 tests (Rust-side inner-client coverage)
@@ -419,7 +421,7 @@ mneme-extract     :  33 tests
 mneme-privacy     :  19 tests
 sdk/node (TS)     :   8 tests (offline, stub fetch)
 ──────────────────────────────
-TOTAL             : 409 Rust tests (406 on --no-default-features) + 8 SDK tests · all passing
+TOTAL             : 419 Rust tests (416 on --no-default-features) + 8 SDK tests · all passing
 ```
 
 ---
