@@ -32,6 +32,7 @@ mod ingestion_worker;
 mod kv;
 mod metrics;
 mod probe;
+mod provenance;
 mod viz;
 
 use axum::routing::get;
@@ -326,6 +327,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/kv/metrics", get(kv::kv_metrics))
         .route("/api/exchange/metrics", get(exchange::exchange_metrics))
         .route("/api/dream/metrics", get(dream::dream_metrics))
+        .route("/api/provenance", get(provenance::provenance_metrics))
         .route("/static/chart.umd.min.js", get(viz::chart_js))
         .with_state(state);
 

@@ -1535,5 +1535,83 @@
     load();
   })();
   </script>
+
+  <!-- ===== Phase 15 · Regulator-grade provenance (the black-box recorder) ===== -->
+  <section id="prov-panel" style="margin:28px auto 40px;max-width:1100px;padding:20px 24px;border:1px solid #2a2f3a;border-radius:12px;background:#11141b;color:#e6e9ef;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <div>
+        <h2 style="margin:0;font-size:18px;">Phase 15 · Regulator-grade provenance</h2>
+        <div style="color:#9aa3b2;font-size:13px;margin-top:2px;">
+          The black-box recorder: re-answer "as the agent knew it" at any past <em>T</em>, trace every belief to its source events, and prove erasure — all over an immutable log.
+        </div>
+      </div>
+      <button id="prov-refresh" style="background:#1f6feb;color:#fff;border:0;border-radius:7px;padding:8px 14px;font-size:13px;cursor:pointer;">Reconstruct</button>
+    </div>
+
+    <div id="prov-kpis" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:16px;"></div>
+    <div id="prov-timetravel" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px;"></div>
+    <h3 style="margin:20px 0 8px;font-size:14px;color:#c8cfdc;">Provenance chain (belief → source events → supersessions)</h3>
+    <div id="prov-chain" style="display:flex;flex-direction:column;gap:6px;"></div>
+    <div id="prov-erasure" style="margin-top:16px;"></div>
+    <div id="prov-note" style="color:#9aa3b2;font-size:12px;margin-top:14px;"></div>
+  </section>
+  <script>
+  (function () {
+    function kpi(label, value, accent) {
+      return '<div style="flex:1;min-width:130px;background:#0c0e14;border:1px solid #232836;border-radius:9px;padding:12px 14px;">'
+        + '<div style="font-size:20px;font-weight:600;color:' + (accent || "#e6e9ef") + ';">' + value + '</div>'
+        + '<div style="font-size:12px;color:#9aa3b2;margin-top:2px;">' + label + '</div></div>';
+    }
+    function tpCard(title, tp) {
+      return '<div style="background:#0c0e14;border:1px solid #232836;border-radius:9px;padding:12px 14px;">'
+        + '<div style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#9aa3b2;">' + title + '</div>'
+        + '<div style="font-size:13px;color:#e6e9ef;margin:6px 0;">' + tp.live_count + ' live memories</div>'
+        + '<div style="font-size:12px;color:#c8cfdc;">Acme belief: “' + (tp.acme_belief || "—") + '”</div></div>';
+    }
+    function chainRow(l) {
+      var color = l.kind === "Written" ? "#3fb950" : (l.kind === "Evolved" ? "#58a6ff" : "#d29922");
+      var arrow = l.to ? (' → ' + l.to.slice(0, 8) + '…') : '';
+      var reason = l.reason ? (' <span style="color:#9aa3b2;">(' + l.reason + ')</span>') : '';
+      return '<div style="display:flex;align-items:center;gap:10px;font-size:12px;border-bottom:1px solid #1b1f29;padding:4px 0;">'
+        + '<span style="min-width:90px;font-weight:600;color:' + color + ';">' + l.kind + '</span>'
+        + '<span style="font-family:ui-monospace,Menlo,monospace;color:#6b7280;min-width:70px;">' + l.memory_id.slice(0, 8) + '…' + arrow + '</span>'
+        + '<span style="flex:1;color:#c8cfdc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (l.snippet || "") + reason + '</span></div>';
+    }
+    function render(d) {
+      var kpis = document.getElementById("prov-kpis");
+      var tt = document.getElementById("prov-timetravel");
+      var chain = document.getElementById("prov-chain");
+      var erasure = document.getElementById("prov-erasure");
+      var note = document.getElementById("prov-note");
+      if (!d.enabled) {
+        kpis.innerHTML = ""; tt.innerHTML = ""; chain.innerHTML = ""; erasure.innerHTML = "";
+        note.textContent = d.note || "Provenance reconstruction unavailable.";
+        return;
+      }
+      kpis.innerHTML = kpi("log entries", d.log_entries, "#58a6ff")
+        + kpi("belief changed across T", d.belief_changed ? "✓" : "—", d.belief_changed ? "#3fb950" : "#9aa3b2")
+        + kpi("chain links", d.chain.length)
+        + kpi("done-when", d.done_when ? "✓" : "✗", d.done_when ? "#3fb950" : "#f85149");
+      tt.innerHTML = tpCard("Before the Acme correction (past T)", d.before)
+        + tpCard("Now", d.now);
+      chain.innerHTML = (d.chain || []).map(chainRow).join("") || '<div style="font-size:12px;color:#6b7280;">(no chain)</div>';
+      var ec = d.log_unchanged ? "#3fb950" : "#f85149";
+      erasure.innerHTML = '<div style="background:#0c0e14;border:1px solid #232836;border-left:3px solid ' + ec + ';border-radius:9px;padding:12px 14px;">'
+        + '<div style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#c8cfdc;">Verifiable erasure — subject “' + d.shred_subject + '”</div>'
+        + '<div style="font-size:12px;color:#c8cfdc;margin-top:6px;">redacted in live read: <b style="color:' + (d.redacted_in_live ? "#3fb950" : "#f85149") + ';">' + d.redacted_in_live + '</b> · redacted in historical replay: <b style="color:' + (d.redacted_in_history ? "#3fb950" : "#f85149") + ';">' + d.redacted_in_history + '</b></div>'
+        + '<div style="font-size:12px;color:#c8cfdc;margin-top:4px;">log untouched (append-only): <b style="color:' + ec + ';">' + d.log_unchanged + '</b> — ' + d.log_entries + ' entries before and after the forget</div></div>';
+      note.textContent = "Pure read-path: the timeline is folded from the log per request, nothing appended. The same crypto-shred forget blanks the subject at every T — an auditor sees an event happened + was redacted, never the erased content.";
+    }
+    function load() {
+      var note = document.getElementById("prov-note");
+      note.textContent = "Replaying the log: reconstructing past belief, tracing provenance, checking erasure…";
+      fetch("/api/provenance").then(function (r) { return r.json(); }).then(render).catch(function (e) {
+        note.textContent = "Provenance reconstruction failed: " + e;
+      });
+    }
+    document.getElementById("prov-refresh").addEventListener("click", load);
+    load();
+  })();
+  </script>
 </body>
 </html>

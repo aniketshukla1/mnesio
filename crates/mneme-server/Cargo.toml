@@ -32,6 +32,7 @@ mneme-probe.workspace = true
 mneme-kv.workspace = true
 mneme-exchange.workspace = true
 mneme-dream.workspace = true
+mneme-provenance.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
