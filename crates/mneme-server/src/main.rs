@@ -20,6 +20,7 @@
 //! background writer that drops a small themed memory story into the log.
 
 mod acl_worker;
+mod causal;
 mod demo;
 mod demo_llm;
 mod demo_procedural;
@@ -316,6 +317,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/agents", get(viz::agents))
         .route("/api/skills", get(viz::skills))
         .route("/api/graph", get(viz::graph))
+        .route("/api/causal/metrics", get(causal::causal_metrics))
         .route("/static/chart.umd.min.js", get(viz::chart_js))
         .with_state(state);
 

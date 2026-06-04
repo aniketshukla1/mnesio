@@ -220,6 +220,11 @@ mod tests {
     // Slice B ↔ Slice A: contribution scoring over the *real Retriever seam*
     // reproduces the Phase-10 "done when" — the load-bearing memories score
     // positive, the dead-weight one scores ~0 and is the GC candidate.
+    //
+    // The candidate list is the *corpus* ([m1, m2, m3]) — what a production
+    // pass hands in (all live memories in scope) — while relevance is the
+    // separate ground truth ({m1, m3}). m2 is retrieved but never relevant,
+    // so masking it leaves recall untouched: a provable GC candidate.
     #[tokio::test]
     async fn scoring_over_the_retriever_recovers_keep_and_gc_sets() {
         let (m1, m2, m3) = (mref(), mref(), mref());
@@ -228,7 +233,7 @@ mod tests {
         let eval = eval.with_task("q", [m1, m3]); // m2 present in corpus but irrelevant
 
         let report = ContributionScorer::new(CausalConfig::default())
-            .score(&eval, &eval.candidate_universe())
+            .score(&eval, &[m1, m2, m3])
             .await
             .unwrap();
 
