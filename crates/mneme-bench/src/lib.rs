@@ -36,6 +36,7 @@ pub use mneme_procedural::PolicyExecutor;
 pub mod gen;
 pub mod memeval;
 pub mod report;
+pub mod scale;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

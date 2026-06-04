@@ -55,7 +55,65 @@ async fn main() -> Result<()> {
         Command::Run(opts) => cmd_run(opts).await,
         Command::Compare(opts) => cmd_compare(opts).await,
         Command::MemEval(opts) => cmd_memeval(opts).await,
+        Command::Scale(opts) => cmd_scale(opts).await,
     }
+}
+
+// ---------------- scale / load ----------------
+
+async fn cmd_scale(opts: ScaleOpts) -> Result<()> {
+    use mneme_bench::scale::{run_scale_point, scale_csv_header, scale_csv_row, ScaleReport};
+
+    eprintln!(
+        "# mneme-bench scale · sizes={:?} · k={} · embedder={} · seed={}",
+        opts.sizes, opts.k, opts.embedder, opts.seed
+    );
+
+    let mut csv = String::new();
+    csv.push_str(&scale_csv_header());
+    csv.push('\n');
+    let mut reports: Vec<ScaleReport> = Vec::new();
+    for &n in &opts.sizes {
+        eprintln!("# … ingesting {n} memories (embedder={})", opts.embedder);
+        let r = run_scale_point(n, opts.seed, opts.k, &opts.embedder).await?;
+        eprintln!(
+            "#   N={:<7} ingest={:.1}s  write={:.0}/s  q_p50={:.2}ms q_p95={:.2}ms q_p99={:.2}ms  recall@{}={:.1}%  slots={}",
+            r.ingested,
+            r.ingest_secs,
+            r.write_throughput_per_sec,
+            r.query_p50_ms,
+            r.query_p95_ms,
+            r.query_p99_ms,
+            r.k,
+            r.recall() * 100.0,
+            r.slot_count,
+        );
+        csv.push_str(&scale_csv_row(&r));
+        csv.push('\n');
+        reports.push(r);
+    }
+
+    write_output(&opts.out_path, &csv)?;
+
+    // Human-readable summary table to stderr.
+    eprintln!("\n# scale summary (embedder={})", opts.embedder);
+    eprintln!(
+        "# {:>8} {:>10} {:>10} {:>9} {:>9} {:>9} {:>9}",
+        "memories", "write/s", "ingest_s", "q_p50ms", "q_p95ms", "q_p99ms", "recall"
+    );
+    for r in &reports {
+        eprintln!(
+            "# {:>8} {:>10.0} {:>10.1} {:>9.2} {:>9.2} {:>9.2} {:>8.1}%",
+            r.ingested,
+            r.write_throughput_per_sec,
+            r.ingest_secs,
+            r.query_p50_ms,
+            r.query_p95_ms,
+            r.query_p99_ms,
+            r.recall() * 100.0,
+        );
+    }
+    Ok(())
 }
 
 // ---------------- memeval (memory recall) ----------------
@@ -584,6 +642,16 @@ enum Command {
     Run(RunOpts),
     Compare(CompareOpts),
     MemEval(MemEvalOpts),
+    Scale(ScaleOpts),
+}
+
+struct ScaleOpts {
+    /// Comma-separated corpus sizes to sweep (e.g. "1000,5000,10000").
+    sizes: Vec<usize>,
+    k: usize,
+    embedder: String,
+    seed: u64,
+    out_path: Option<std::path::PathBuf>,
 }
 
 struct MemEvalOpts {
@@ -651,6 +719,10 @@ fn parse_args() -> Result<RootArgs> {
             iter.next();
             "memeval"
         }
+        Some("scale") => {
+            iter.next();
+            "scale"
+        }
         Some("--help") | Some("-h") => {
             print_help();
             std::process::exit(0);
@@ -670,8 +742,53 @@ fn parse_args() -> Result<RootArgs> {
         "memeval" => Ok(RootArgs {
             command: Command::MemEval(parse_memeval(iter)?),
         }),
+        "scale" => Ok(RootArgs {
+            command: Command::Scale(parse_scale(iter)?),
+        }),
         _ => unreachable!(),
     }
+}
+
+fn parse_scale(mut iter: std::iter::Peekable<impl Iterator<Item = String>>) -> Result<ScaleOpts> {
+    let mut opts = ScaleOpts {
+        sizes: vec![1000, 5000, 10000],
+        k: 10,
+        embedder: "mock".into(),
+        seed: 42,
+        out_path: None,
+    };
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--sizes" => {
+                let raw = next_value(&mut iter, "--sizes")?;
+                let mut sizes = Vec::new();
+                for part in raw.split(',') {
+                    let part = part.trim();
+                    if part.is_empty() {
+                        continue;
+                    }
+                    sizes.push(
+                        part.parse::<usize>()
+                            .map_err(|_| anyhow::anyhow!("--sizes: {part:?} is not a number"))?,
+                    );
+                }
+                if sizes.is_empty() {
+                    bail!("--sizes requires at least one number");
+                }
+                opts.sizes = sizes;
+            }
+            "--k" => opts.k = next_value(&mut iter, "--k")?.parse()?,
+            "--embedder" => opts.embedder = next_value(&mut iter, "--embedder")?,
+            "--seed" => opts.seed = next_value(&mut iter, "--seed")?.parse()?,
+            "--out" => opts.out_path = Some(next_value(&mut iter, "--out")?.into()),
+            "--help" | "-h" => {
+                print_help();
+                std::process::exit(0);
+            }
+            other => bail!("unknown argument {other:?}; pass --help for usage"),
+        }
+    }
+    Ok(opts)
 }
 
 fn parse_memeval(
@@ -802,6 +919,15 @@ fn print_help() {
          \x20\x20             (default — invoked when no subcommand is given)\n\
          \x20\x20compare    A vs B evaluation of two artifact bodies against a fixed suite\n\
          \x20\x20memeval    memory recall@k over the real ingest→retrieve path\n\
+         \x20\x20scale      large-scale load test: throughput + latency percentiles + recall\n\
+         \x20\x20             over a deterministic synthetic corpus (1k–100k+)\n\
+         \n\
+         SCALE OPTIONS:\n\
+         \x20\x20--sizes          comma-separated corpus sizes    (default: 1000,5000,10000)\n\
+         \x20\x20--k              top-k for recall                (default: 10)\n\
+         \x20\x20--embedder       mock | fastembed                (default: mock)\n\
+         \x20\x20--seed           generator seed                  (default: 42)\n\
+         \x20\x20--out PATH       CSV output file                 (default: stdout)\n\
          \n\
          MEMEVAL OPTIONS:\n\
          \x20\x20--suite          locomo | longmemeval             (default: locomo)\n\
