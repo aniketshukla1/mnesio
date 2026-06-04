@@ -1234,5 +1234,90 @@
     load();
   })();
   </script>
+
+  <!-- ===== Phase 11 · Self-falsifying memory (acceptance probes + belief) ===== -->
+  <section id="probe-panel" style="margin:28px auto;max-width:1100px;padding:20px 24px;border:1px solid #2a2f3a;border-radius:12px;background:#11141b;color:#e6e9ef;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <div>
+        <h2 style="margin:0;font-size:18px;">Phase 11 · Self-falsifying memory</h2>
+        <div style="color:#9aa3b2;font-size:13px;margin-top:2px;">
+          Memory with CI. Acceptance probes re-check each claim; a refuted memory <em>invalidates-and-supersedes</em> itself (history kept). Each memory carries a calibrated belief — confidence + why.
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button id="probe-dryrun" style="background:#30363d;color:#e6e9ef;border:1px solid #444c56;border-radius:7px;padding:8px 14px;font-size:13px;cursor:pointer;">Dry run</button>
+        <button id="probe-apply" style="background:#bb3b3b;color:#fff;border:0;border-radius:7px;padding:8px 14px;font-size:13px;cursor:pointer;">Falsify now</button>
+      </div>
+    </div>
+
+    <div id="probe-kpis" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:16px;"></div>
+    <div id="probe-example" style="margin-top:16px;"></div>
+
+    <h3 style="margin:20px 0 8px;font-size:14px;color:#c8cfdc;">Probe outcomes (refuted first) — belief + confidence + why</h3>
+    <div id="probe-outcomes" style="display:flex;flex-direction:column;gap:6px;"></div>
+    <div id="probe-note" style="color:#9aa3b2;font-size:12px;margin-top:14px;"></div>
+  </section>
+  <script>
+  (function () {
+    var fmtPct = function (x) { return (x * 100).toFixed(0) + "%"; };
+    function kpi(label, value, accent) {
+      return '<div style="flex:1;min-width:130px;background:#0c0e14;border:1px solid #232836;border-radius:9px;padding:12px 14px;">'
+        + '<div style="font-size:22px;font-weight:600;color:' + (accent || "#e6e9ef") + ';">' + value + '</div>'
+        + '<div style="font-size:12px;color:#9aa3b2;margin-top:2px;">' + label + '</div></div>';
+    }
+    function statusColor(s) {
+      return s === "Refuted" ? "#f85149" : (s === "Inconclusive" ? "#d29922" : "#3fb950");
+    }
+    function exampleCard(e, applied) {
+      if (!e) return '';
+      var head = applied ? "Auto-superseded — no human in the loop" : "Would auto-supersede (click “Falsify now”)";
+      return '<div style="background:#0c0e14;border:1px solid #232836;border-left:3px solid #f85149;border-radius:9px;padding:14px 16px;">'
+        + '<div style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#f85149;">' + head + '</div>'
+        + '<div style="margin:8px 0;font-size:13px;color:#c8cfdc;"><span style="color:#9aa3b2;">stale claim:</span> “' + (e.stale_claim || "") + '”</div>'
+        + '<div style="margin:8px 0;font-size:13px;color:#c8cfdc;"><span style="color:#9aa3b2;">correction:</span> “' + (e.correction || "") + '”</div>'
+        + '<div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#9aa3b2;">confidence ' + fmtPct(e.confidence_before) + ' → ' + fmtPct(e.confidence_after) + ' on probe failure</div></div>';
+    }
+    function row(o) {
+      var c = statusColor(o.status);
+      var badge = '<span style="color:' + c + ';font-weight:600;min-width:96px;display:inline-block;">' + o.status + '</span>';
+      var conf = '<span style="font-family:ui-monospace,Menlo,monospace;color:' + (o.belief.doubted ? "#f85149" : "#9aa3b2") + ';">' + fmtPct(o.belief.confidence) + '</span>';
+      return '<div style="display:flex;align-items:center;gap:10px;font-size:12px;border-bottom:1px solid #1b1f29;padding:4px 0;">'
+        + badge + conf
+        + '<span style="flex:1;color:#c8cfdc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + (o.belief.why || "").replace(/"/g, "&quot;") + '">' + (o.snippet || "") + '</span></div>';
+    }
+    function render(d) {
+      var kpis = document.getElementById("probe-kpis");
+      var ex = document.getElementById("probe-example");
+      var outs = document.getElementById("probe-outcomes");
+      var note = document.getElementById("probe-note");
+      if (!d.enabled) {
+        kpis.innerHTML = ""; ex.innerHTML = ""; outs.innerHTML = "";
+        note.textContent = d.note || "Probe pass unavailable.";
+        return;
+      }
+      kpis.innerHTML = kpi("live memories", d.live_memories)
+        + kpi("held", d.held, "#3fb950")
+        + kpi("refuted", d.refuted, "#f85149")
+        + kpi("inconclusive", d.inconclusive, "#d29922")
+        + kpi(d.applied ? "superseded" : "would supersede", d.applied ? d.superseded : d.refuted, "#58a6ff");
+      ex.innerHTML = exampleCard(d.falsify_example, d.applied);
+      outs.innerHTML = (d.outcomes || []).map(row).join("");
+      note.textContent = d.applied
+        ? ("Falsified " + d.superseded + " memory(ies): each refuted claim was invalidated and a correction written — history kept (Hard Rule #2). Re-run search to see the correction surface."
+          )
+        : "Dry run: nothing was changed. “Falsify now” appends a supersede triple (MemoryWritten correction + MemoryEvolved + MemoryInvalidated) for each refuted memory.";
+    }
+    function load(apply) {
+      var note = document.getElementById("probe-note");
+      note.textContent = apply ? "Running probes + falsifying refuted claims…" : "Running acceptance-probe pass over the live corpus…";
+      fetch("/api/probe/metrics" + (apply ? "?apply=true" : "")).then(function (r) { return r.json(); }).then(render).catch(function (e) {
+        note.textContent = "Probe pass failed: " + e;
+      });
+    }
+    document.getElementById("probe-dryrun").addEventListener("click", function () { load(false); });
+    document.getElementById("probe-apply").addEventListener("click", function () { load(true); });
+    load(false);
+  })();
+  </script>
 </body>
 </html>
