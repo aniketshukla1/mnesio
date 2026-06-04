@@ -73,6 +73,7 @@ Twelve crates, each with a focused responsibility. External dependencies sit beh
 | `mneme-llm` | `LlmClient` implementations: `FakeLlmClient`, `OllamaLlmClient` (feature-gated) | ✅ |
 | `mneme-evolve` | Bounded A-MEM-style memory evolution worker | ✅ Phase 1 |
 | `mneme-procedural` | GEPA-style procedural compiler + gate + eval suite + learning curve | ✅ Phase 2 |
+| `mneme-causal` | Counterfactual contribution scoring + GC by measurement (leave-one-out ablation over the replayable log) | ✅ Phase 10 |
 | `mneme-bench` | Eval-as-product harness — procedural learning curve (GSM8K/HumanEval) + memory recall@k (LOCOMO/LongMemEval) | ✅ Phase 2/6 |
 | `mneme-server` | Host process: HTTP API, dashboard, demo wiring | ✅ |
 | `mneme-mcp` | MCP server: exposes mneme as tools to Claude Desktop / Cline / any MCP client | ✅ Phase 5 |
@@ -405,6 +406,7 @@ mneme-llm         :  11 tests
 mneme-index       :  80 tests
 mneme-evolve      :  27 tests
 mneme-procedural  : 107 tests
+mneme-causal      :  15 tests
 mneme-bench       :  12 tests
 mneme-mcp         :  26 tests (unit + integration)
 mneme-py          :   7 tests (Rust-side inner-client coverage)
@@ -415,7 +417,7 @@ mneme-extract     :  33 tests
 mneme-privacy     :  19 tests
 sdk/node (TS)     :   8 tests (offline, stub fetch)
 ──────────────────────────────
-TOTAL             : 380 Rust tests (377 on --no-default-features) + 8 SDK tests · all passing
+TOTAL             : 395 Rust tests (392 on --no-default-features) + 8 SDK tests · all passing
 ```
 
 ---
