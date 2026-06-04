@@ -27,6 +27,7 @@ mod demo_procedural;
 mod embedding_worker;
 mod graph_worker;
 mod ingestion_worker;
+mod kv;
 mod metrics;
 mod probe;
 mod viz;
@@ -320,6 +321,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/graph", get(viz::graph))
         .route("/api/causal/metrics", get(causal::causal_metrics))
         .route("/api/probe/metrics", get(probe::probe_metrics))
+        .route("/api/kv/metrics", get(kv::kv_metrics))
         .route("/static/chart.umd.min.js", get(viz::chart_js))
         .with_state(state);
 

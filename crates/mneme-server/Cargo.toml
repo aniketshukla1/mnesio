@@ -29,6 +29,7 @@ mneme-llm = { workspace = true, default-features = false }
 mneme-procedural.workspace = true
 mneme-causal.workspace = true
 mneme-probe.workspace = true
+mneme-kv.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

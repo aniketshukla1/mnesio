@@ -1319,5 +1319,79 @@
     load(false);
   })();
   </script>
+
+  <!-- ===== Phase 12 · Gated KV cartridges (KV cache as a view of the log) ===== -->
+  <section id="kv-panel" style="margin:28px auto;max-width:1100px;padding:20px 24px;border:1px solid #2a2f3a;border-radius:12px;background:#11141b;color:#e6e9ef;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <div>
+        <h2 style="margin:0;font-size:18px;">Phase 12 · Gated KV cartridges <span style="font-size:12px;color:#d29922;">moonshot</span></h2>
+        <div style="color:#9aa3b2;font-size:13px;margin-top:2px;">
+          A KV cache as <em>just another materialized view of the log</em> — versioned, gated before activation, and erasable by recompile. (Tensor backend simulated; the reconciliations are real.)
+        </div>
+      </div>
+      <button id="kv-refresh" style="background:#1f6feb;color:#fff;border:0;border-radius:7px;padding:8px 14px;font-size:13px;cursor:pointer;">Compile &amp; test</button>
+    </div>
+
+    <div id="kv-kpis" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:16px;"></div>
+    <div id="kv-facets" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:16px;"></div>
+    <div id="kv-note" style="color:#9aa3b2;font-size:12px;margin-top:14px;"></div>
+  </section>
+  <script>
+  (function () {
+    function kpi(label, value, accent) {
+      return '<div style="flex:1;min-width:140px;background:#0c0e14;border:1px solid #232836;border-radius:9px;padding:12px 14px;">'
+        + '<div style="font-size:22px;font-weight:600;color:' + (accent || "#e6e9ef") + ';">' + value + '</div>'
+        + '<div style="font-size:12px;color:#9aa3b2;margin-top:2px;">' + label + '</div></div>';
+    }
+    function facet(title, pass, lines) {
+      var color = pass ? "#3fb950" : "#f85149";
+      var mark = pass ? "✓" : "✗";
+      return '<div style="background:#0c0e14;border:1px solid #232836;border-left:3px solid ' + color + ';border-radius:9px;padding:12px 14px;">'
+        + '<div style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:' + color + ';">' + mark + ' ' + title + '</div>'
+        + lines.map(function (l) { return '<div style="font-size:12px;color:#c8cfdc;margin-top:6px;">' + l + '</div>'; }).join("")
+        + '</div>';
+    }
+    function render(d) {
+      var kpis = document.getElementById("kv-kpis");
+      var facets = document.getElementById("kv-facets");
+      var note = document.getElementById("kv-note");
+      if (!d.enabled) {
+        kpis.innerHTML = ""; facets.innerHTML = "";
+        note.textContent = d.note || "KV cartridge demo unavailable.";
+        return;
+      }
+      var speedup = d.kv_latency_us > 0 ? (d.text_latency_us / d.kv_latency_us) : 0;
+      kpis.innerHTML = kpi("model", d.model_id, "#58a6ff")
+        + kpi("live memories", d.live_memories)
+        + kpi("active version", "v" + d.active_version)
+        + kpi("speedup vs text", speedup >= 1 ? speedup.toFixed(1) + "×" : "—", "#3fb950");
+      facets.innerHTML =
+        facet("Lower latency, equal accuracy", d.faster && d.kv_correct && (d.text_correct === d.kv_correct || d.kv_correct), [
+          "cartridge: <b>" + d.kv_latency_us + " µs</b>" + (d.kv_correct ? " ✓correct" : " ✗"),
+          "text-context: <b>" + d.text_latency_us + " µs</b>" + (d.text_correct ? " ✓correct" : " ✗"),
+          "query: “" + d.held_out_query + "”",
+        ])
+        + facet("Gate before activation", d.gate_committable && d.active_version > 0, [
+          "is_committable() = <b>" + d.gate_committable + "</b>",
+          "only a gate-passing cartridge serves (Hard Rule #1)",
+        ])
+        + facet("Crypto-shred by recompile", d.shred_succeeded, [
+          "forgot subject <b>" + d.shred_subject + "</b>, recompiled",
+          "members " + d.members_before_shred + " → " + d.members_after_shred,
+          "answerable about subject: <b>" + d.answerable_before_shred + "</b> → <b>" + d.answerable_after_shred + "</b>",
+        ]);
+      note.textContent = "Read-only w.r.t. the log: the keyring + cartridge store are ephemeral per request — compiling a cartridge appends nothing. Forget a subject's key + recompile and the rebuilt tensor can't reconstruct the erased content (Hard Rule #2).";
+    }
+    function load() {
+      var note = document.getElementById("kv-note");
+      note.textContent = "Compiling a KV cartridge from the live corpus + running the three facet checks…";
+      fetch("/api/kv/metrics").then(function (r) { return r.json(); }).then(render).catch(function (e) {
+        note.textContent = "KV cartridge demo failed: " + e;
+      });
+    }
+    document.getElementById("kv-refresh").addEventListener("click", load);
+    load();
+  })();
+  </script>
 </body>
 </html>
