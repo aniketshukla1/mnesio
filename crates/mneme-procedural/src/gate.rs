@@ -116,8 +116,15 @@ impl EvalGates {
         // (one rejection reason per gate, with numeric context). They
         // can be tuned *stricter* than the baseline but never weaker —
         // the `BaselineFailed` above is the floor.
+        // Each float floor below is checked as `value.is_nan() || value <
+        // floor`. Spelling out the NaN case is deliberate: `NaN < floor` is
+        // `false`, so a plain `value < floor` test would silently *pass* a NaN
+        // metric. A malformed report carrying `replay_success_rate = NaN`
+        // (full canaries, safety ok, Δ ≥ 0) would otherwise sneak a commit
+        // past the tail-protection floor — `is_nan()` treats it as a failure,
+        // the safe direction (Hard Rule #1).
         let canary_rate = canary_pass_rate(report);
-        if canary_rate < self.min_canary_pass_rate {
+        if canary_rate.is_nan() || canary_rate < self.min_canary_pass_rate {
             reasons.push(RejectReason::CanariesFailing {
                 passed: report.canaries_passed,
                 total: report.canaries_total,
@@ -127,13 +134,15 @@ impl EvalGates {
         if self.require_safety_probe && !report.safety_probe_passed {
             reasons.push(RejectReason::SafetyProbeFailed);
         }
-        if report.objective_delta < self.min_objective_delta {
+        if report.objective_delta.is_nan() || report.objective_delta < self.min_objective_delta {
             reasons.push(RejectReason::ObjectiveRegression {
                 delta: report.objective_delta,
                 min_required: self.min_objective_delta,
             });
         }
-        if report.replay_success_rate < self.min_replay_success_rate {
+        if report.replay_success_rate.is_nan()
+            || report.replay_success_rate < self.min_replay_success_rate
+        {
             reasons.push(RejectReason::ReplayRegression {
                 rate: report.replay_success_rate,
                 min_required: self.min_replay_success_rate,
@@ -332,6 +341,77 @@ mod tests {
         r.canaries_total = 0;
         let v = EvalGates::default().evaluate(&r);
         assert!(v.committable, "no canaries = nothing to fail");
+    }
+
+    // --- malformed / NaN report adversarial cases ---------------------
+    // A report is untrusted input (an executor or a decoded legacy event can
+    // produce garbage). No malformed report may sneak a commit past the gate.
+
+    #[test]
+    fn nan_replay_rate_cannot_sneak_a_commit() {
+        // The dangerous one: replay_success_rate is NOT part of the strict
+        // baseline, so a NaN here passes `is_committable()`. A naive
+        // `rate < floor` check is `false` for NaN and would let it commit,
+        // silently bypassing tail protection. The NaN-safe gate rejects it.
+        let mut r = passing_report();
+        r.replay_success_rate = f32::NAN;
+        assert!(
+            r.is_committable(),
+            "baseline doesn't see replay — that's exactly why the gate must"
+        );
+        let v = EvalGates::default().evaluate(&r);
+        assert!(v.rejected(), "NaN replay rate must NOT commit");
+        assert!(v
+            .reasons
+            .iter()
+            .any(|r| matches!(r, RejectReason::ReplayRegression { .. })));
+    }
+
+    #[test]
+    fn nan_objective_delta_is_rejected() {
+        let mut r = passing_report();
+        r.objective_delta = f32::NAN;
+        // Baseline already catches this (NaN >= 0.0 is false), and the
+        // structured objective reason now fires too (NaN-safe comparison).
+        assert!(!r.is_committable());
+        let v = EvalGates::default().evaluate(&r);
+        assert!(v.rejected());
+        assert!(v.reasons.contains(&RejectReason::BaselineFailed));
+        assert!(v
+            .reasons
+            .iter()
+            .any(|r| matches!(r, RejectReason::ObjectiveRegression { .. })));
+    }
+
+    #[test]
+    fn infinite_metrics_do_not_panic() {
+        // ±inf are not NaN; the comparisons are well-defined. A +inf delta is
+        // a (degenerate) improvement and a +inf replay clears any finite
+        // floor — the point is simply that the gate evaluates without panic.
+        let mut r = passing_report();
+        r.objective_delta = f32::INFINITY;
+        r.replay_success_rate = f32::INFINITY;
+        let v = EvalGates::default().evaluate(&r);
+        assert!(v.committable, "+inf metrics clear finite floors");
+
+        let mut r = passing_report();
+        r.objective_delta = f32::NEG_INFINITY;
+        let v = EvalGates::default().evaluate(&r);
+        assert!(v.rejected(), "-inf delta is a regression");
+    }
+
+    #[test]
+    fn canaries_passed_exceeding_total_is_rejected() {
+        // Malformed counts (passed > total) must not be read as "over 100%
+        // pass". The baseline equality check (passed == total) rejects it.
+        let mut r = passing_report();
+        r.canaries_passed = 11;
+        r.canaries_total = 10;
+        assert!(
+            !r.is_committable(),
+            "passed>total is malformed → not committable"
+        );
+        assert!(EvalGates::default().evaluate(&r).rejected());
     }
 
     // --- safety probe gate --------------------------------------------
