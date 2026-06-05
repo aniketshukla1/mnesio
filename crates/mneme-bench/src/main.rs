@@ -56,9 +56,43 @@ async fn main() -> Result<()> {
         Command::Compare(opts) => cmd_compare(opts).await,
         Command::MemEval(opts) => cmd_memeval(opts).await,
         Command::Scale(opts) => cmd_scale(opts).await,
+        Command::Compete(opts) => cmd_compete(opts).await,
         #[cfg(feature = "fetch")]
         Command::Fetch(opts) => cmd_fetch(opts).await,
     }
+}
+
+// ---------------- compete (competitive comparison) ----------------
+
+async fn cmd_compete(opts: CompeteOpts) -> Result<()> {
+    use mneme_bench::compete::{compete_markdown, run_compete};
+
+    eprintln!(
+        "# mneme-bench compete · k={} · embedder={}",
+        opts.k, opts.embedder
+    );
+    let report = run_compete(opts.k, &opts.embedder).await?;
+    let md = compete_markdown(&report);
+    write_output(&opts.out_path, &md)?;
+
+    eprintln!("# measured recall@{} (embedder={}):", opts.k, opts.embedder);
+    eprintln!(
+        "#   LOCOMO-mini      {:.1}%   ({} memories, {} questions)",
+        report.mneme_locomo.recall() * 100.0,
+        report.mneme_locomo.memory_count,
+        report.mneme_locomo.total_questions,
+    );
+    eprintln!(
+        "#   LongMemEval-mini {:.1}%   ({} memories, {} questions)",
+        report.mneme_longmemeval.recall() * 100.0,
+        report.mneme_longmemeval.memory_count,
+        report.mneme_longmemeval.total_questions,
+    );
+    eprintln!(
+        "# note: mneme number is retrieval recall@k; cited competitor numbers are \
+         end-to-end QA accuracy (different metric) — see the report header."
+    );
+    Ok(())
 }
 
 // ---------------- fetch (real public benchmark) ----------------
@@ -682,8 +716,15 @@ enum Command {
     Compare(CompareOpts),
     MemEval(MemEvalOpts),
     Scale(ScaleOpts),
+    Compete(CompeteOpts),
     #[cfg(feature = "fetch")]
     Fetch(FetchOpts),
+}
+
+struct CompeteOpts {
+    k: usize,
+    embedder: String,
+    out_path: Option<std::path::PathBuf>,
 }
 
 #[cfg(feature = "fetch")]
@@ -774,6 +815,10 @@ fn parse_args() -> Result<RootArgs> {
             iter.next();
             "scale"
         }
+        Some("compete") => {
+            iter.next();
+            "compete"
+        }
         Some("fetch") => {
             iter.next();
             "fetch"
@@ -799,6 +844,9 @@ fn parse_args() -> Result<RootArgs> {
         }),
         "scale" => Ok(RootArgs {
             command: Command::Scale(parse_scale(iter)?),
+        }),
+        "compete" => Ok(RootArgs {
+            command: Command::Compete(parse_compete(iter)?),
         }),
         "fetch" => {
             #[cfg(feature = "fetch")]
@@ -876,6 +924,29 @@ fn parse_scale(mut iter: std::iter::Peekable<impl Iterator<Item = String>>) -> R
             "--k" => opts.k = next_value(&mut iter, "--k")?.parse()?,
             "--embedder" => opts.embedder = next_value(&mut iter, "--embedder")?,
             "--seed" => opts.seed = next_value(&mut iter, "--seed")?.parse()?,
+            "--out" => opts.out_path = Some(next_value(&mut iter, "--out")?.into()),
+            "--help" | "-h" => {
+                print_help();
+                std::process::exit(0);
+            }
+            other => bail!("unknown argument {other:?}; pass --help for usage"),
+        }
+    }
+    Ok(opts)
+}
+
+fn parse_compete(
+    mut iter: std::iter::Peekable<impl Iterator<Item = String>>,
+) -> Result<CompeteOpts> {
+    let mut opts = CompeteOpts {
+        k: 10,
+        embedder: "mock".into(),
+        out_path: None,
+    };
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--k" => opts.k = next_value(&mut iter, "--k")?.parse()?,
+            "--embedder" => opts.embedder = next_value(&mut iter, "--embedder")?,
             "--out" => opts.out_path = Some(next_value(&mut iter, "--out")?.into()),
             "--help" | "-h" => {
                 print_help();
@@ -1017,6 +1088,8 @@ fn print_help() {
          \x20\x20memeval    memory recall@k over the real ingest→retrieve path\n\
          \x20\x20scale      large-scale load test: throughput + latency percentiles + recall\n\
          \x20\x20             over a deterministic synthetic corpus (1k–100k+)\n\
+         \x20\x20compete    competitive comparison: mneme's measured recall + capability\n\
+         \x20\x20             matrix + cited competitor QA scores (Mem0/Zep papers)\n\
          \x20\x20fetch      download a REAL public benchmark (SQuAD) + run recall@k\n\
          \x20\x20             (requires building with --features fetch)\n\
          \n\

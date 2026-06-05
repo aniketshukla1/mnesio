@@ -67,6 +67,14 @@ architecture:
 Reports throughput and p50/p95/p99 latency for each phase, plus query latency
 and recall@k. CSV via `--out`.
 
+### `compete` — competitive comparison
+Runs mneme's *measured* retrieval recall@k on the LOCOMO/LongMemEval mini-suites
+and assembles a Markdown report with (1) a factual capability matrix vs
+Mem0/Zep/Letta/A-MEM and (2) cited competitor end-to-end QA scores from the
+Mem0 (arXiv:2504.19413) and Zep (arXiv:2501.13956) papers. The report leads
+with a methodology note: recall@k (retrieval-quality proxy) and QA accuracy are
+*different metrics* and are never presented as one ranking.
+
 ### `fetch` — real public benchmark *(feature `fetch`)*
 Downloads a real dataset from the Hugging Face datasets-server, projects it into
 a recall suite (SQuAD: each context → a memory, deduplicated; each

@@ -450,6 +450,64 @@ the identical corpus.)
 
 ---
 
+## ⚖️ How mneme compares
+
+```bash
+cargo run -p mneme-bench -- compete --k 10 --embedder fastembed
+```
+
+> **Two different metrics, kept separate.** The capability matrix below is a
+> *structural* comparison. The benchmark numbers further down mix **cited
+> competitor end-to-end QA accuracy** with mneme's **measured retrieval
+> recall@k** — a retrieval-quality proxy, *not the same metric*. recall@k asks
+> "was the gold answer in the retrieved set?"; QA accuracy asks "did the model
+> produce the right answer?". We never present one as if it beat the other.
+
+### Capability matrix
+
+| Capability | mneme | Mem0 | Zep | Letta | A-MEM |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Append-only, replayable event log as system of record | ✅ | — | ◑ | — | — |
+| Bi-temporal versioning (never overwrite; invalidate-and-supersede) | ✅ | ◑ | ✅ | — | — |
+| Hybrid retrieval (vector + BM25 + RRF) with explainable breakdown | ✅ | ◑ | ◑ | ◑ | ◑ |
+| Procedural self-improvement (gets better at tasks over time) | ✅ | — | — | ◑ | — |
+| Non-bypassable commit gate (canaries + safety probe) | ✅ | — | — | — | — |
+| Counterfactual contribution scoring + GC by measurement | ✅ | — | — | — | — |
+| Self-falsifying memory (probes auto-supersede on failure) | ✅ | — | — | — | — |
+| Crypto-shred erasure reconciled with an append-only log | ✅ | — | — | — | — |
+| Time-travel reconstruction + provenance chains | ✅ | — | ◑ | — | — |
+| Certified skill exchange (re-gated on import) | ✅ | — | — | — | — |
+| Self-contained / embedded (no external vector or graph DB) | ✅ | ◑ | ◑ | ✅ | ◑ |
+
+✅ shipped · ◑ partial · — not in published design. Competitor cells reflect
+each system's published architecture and may evolve. **mneme is the only
+column with every row** — the frontier features require the append-only +
+replayable + bi-temporal substrate behind a non-bypassable gate, which a
+storage-shaped system can't add without rebuilding its foundation.
+
+### Benchmark landscape (cited end-to-end QA — *different metric from recall@k*)
+
+| System | Benchmark | Metric | Score | Source |
+|---|---|---|---:|---|
+| Full-context (upper bound) | LOCOMO | LLM-as-Judge (J) | 72.90% | Mem0 paper, [arXiv:2504.19413](https://arxiv.org/abs/2504.19413), Table 2 |
+| Mem0 (graph) | LOCOMO | LLM-as-Judge (J) | 68.44% | Mem0 paper, [arXiv:2504.19413](https://arxiv.org/abs/2504.19413), Table 2 |
+| Mem0 | LOCOMO | LLM-as-Judge (J) | 66.88% | Mem0 paper, [arXiv:2504.19413](https://arxiv.org/abs/2504.19413), Table 2 |
+| Zep | LOCOMO | LLM-as-Judge (J) | 65.99% | Mem0 paper, [arXiv:2504.19413](https://arxiv.org/abs/2504.19413), Table 2 |
+| LangMem | LOCOMO | LLM-as-Judge (J) | 58.10% | Mem0 paper, [arXiv:2504.19413](https://arxiv.org/abs/2504.19413), Table 2 |
+| A-Mem | LOCOMO | LLM-as-Judge (J) | 48.38% | Mem0 paper, [arXiv:2504.19413](https://arxiv.org/abs/2504.19413), Table 2 |
+| Zep (gpt-4o) | LongMemEval | QA accuracy | 71.20% | Zep paper, [arXiv:2501.13956](https://arxiv.org/abs/2501.13956), Table 2 |
+| Full-context (gpt-4o) | LongMemEval | QA accuracy | 60.20% | Zep paper, [arXiv:2501.13956](https://arxiv.org/abs/2501.13956), Table 2 |
+
+These are competitor/baseline numbers from the cited papers — **not mneme's**.
+mneme's *measured* numbers are retrieval recall@k: **98.1%** on real SQuAD
+(fastembed, §Scale & real-data above) and 100% on the curated LOCOMO/
+LongMemEval mini-suites. An apples-to-apples QA-accuracy run would put an LLM
+judge over mneme's retrieved context (mneme ships the `Judge` + synthesizer
+path for it; it's just not part of the offline CI number). mneme's
+differentiation is the capability matrix, not a single leaderboard cell.
+
+---
+
 ## 🗺️ Roadmap
 
 - **Phase 0** ✅ Foundation — event log, hybrid retrieval, dashboard
@@ -493,7 +551,7 @@ mneme-kv          :  10 tests
 mneme-exchange    :  11 tests
 mneme-dream       :  10 tests
 mneme-provenance  :   7 tests
-mneme-bench       :  21 tests (+4 under --features fetch: real-data loader)
+mneme-bench       :  24 tests (+4 under --features fetch: real-data loader)
 mneme-mcp         :  26 tests (unit + integration)
 mneme-py          :   7 tests (Rust-side inner-client coverage)
 mneme-server      :  27 tests
@@ -503,7 +561,7 @@ mneme-extract     :  33 tests
 mneme-privacy     :  19 tests
 sdk/node (TS)     :   8 tests (offline, stub fetch)
 ──────────────────────────────
-TOTAL             : 458 Rust tests (455 on --no-default-features) + 8 SDK tests · all passing
+TOTAL             : 461 Rust tests (458 on --no-default-features) + 8 SDK tests · all passing
                     (+4 more with --features fetch on mneme-bench)
 ```
 
