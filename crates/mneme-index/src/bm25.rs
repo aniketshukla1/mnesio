@@ -203,6 +203,77 @@ impl Bm25View {
     /// hybrid retriever can fuse it with other signals. Wraps the
     /// diagnostic variant for callers that don't care which fallback tier
     /// produced the hits.
+    /// Stage one entry into the writer **without** committing, advancing the
+    /// checkpoint. Returns `true` if the entry changed the index (a write or
+    /// invalidation), `false` for unrelated events.
+    ///
+    /// This is the bulk-ingest / replay-rebuild building block: stage many
+    /// entries, then call [`commit`](Self::commit) **once**. Committing per
+    /// document — as the live [`apply`](MaterializedView::apply) path does —
+    /// flushes a tantivy segment each time, which is fine for a trickle of
+    /// writes but pathological for a large replay (it turns an O(N) ingest into
+    /// O(N) segment flushes). Staged entries are not searchable until the
+    /// commit; that's exactly the contract a rebuild wants.
+    pub fn stage(&self, entry: &LogEntry) -> Result<bool, MnemeError> {
+        let changed = match &entry.event {
+            Event::MemoryWritten(m) => {
+                let mut doc = TantivyDocument::default();
+                doc.add_text(self.fields.memory_id, m.id.to_string());
+                doc.add_text(self.fields.content, &m.content);
+                doc.add_text(self.fields.tags, m.tags.join(" "));
+                doc.add_text(self.fields.tenant, &m.scope.tenant);
+                if let Some(u) = &m.scope.user {
+                    doc.add_text(self.fields.user, u);
+                }
+                if let Some(s) = &m.scope.session {
+                    doc.add_text(self.fields.session, s);
+                }
+                let writer = self
+                    .writer
+                    .lock()
+                    .map_err(|e| MnemeError::Index(format!("bm25 writer poisoned: {e}")))?;
+                writer
+                    .add_document(doc)
+                    .map_err(|e| MnemeError::Index(format!("bm25 add: {e}")))?;
+                true
+            }
+            Event::MemoryInvalidated { id, .. } => {
+                let term = Term::from_field_text(self.fields.memory_id, &id.0.to_string());
+                let writer = self
+                    .writer
+                    .lock()
+                    .map_err(|e| MnemeError::Index(format!("bm25 writer poisoned: {e}")))?;
+                writer.delete_term(term);
+                true
+            }
+            _ => false,
+        };
+        *self
+            .last_checkpoint
+            .write()
+            .map_err(|e| MnemeError::Index(format!("checkpoint lock poisoned: {e}")))? =
+            Some(entry.id);
+        Ok(changed)
+    }
+
+    /// Commit staged writes and reload the reader so they become searchable.
+    /// Pair with [`stage`](Self::stage) for bulk replay-rebuilds.
+    pub fn commit(&self) -> Result<(), MnemeError> {
+        {
+            let mut writer = self
+                .writer
+                .lock()
+                .map_err(|e| MnemeError::Index(format!("bm25 writer poisoned: {e}")))?;
+            writer
+                .commit()
+                .map_err(|e| MnemeError::Index(format!("bm25 commit: {e}")))?;
+        }
+        self.reader
+            .reload()
+            .map_err(|e| MnemeError::Index(format!("bm25 reload: {e}")))?;
+        Ok(())
+    }
+
     pub fn search(
         &self,
         query_text: &str,
@@ -418,58 +489,12 @@ impl MaterializedView for Bm25View {
     }
 
     async fn apply(&self, entry: &LogEntry) -> Result<(), MnemeError> {
-        match &entry.event {
-            Event::MemoryWritten(m) => {
-                let mut doc = TantivyDocument::default();
-                doc.add_text(self.fields.memory_id, m.id.to_string());
-                doc.add_text(self.fields.content, &m.content);
-                doc.add_text(self.fields.tags, m.tags.join(" "));
-                doc.add_text(self.fields.tenant, &m.scope.tenant);
-                if let Some(u) = &m.scope.user {
-                    doc.add_text(self.fields.user, u);
-                }
-                if let Some(s) = &m.scope.session {
-                    doc.add_text(self.fields.session, s);
-                }
-                {
-                    let mut writer = self
-                        .writer
-                        .lock()
-                        .map_err(|e| MnemeError::Index(format!("bm25 writer poisoned: {e}")))?;
-                    writer
-                        .add_document(doc)
-                        .map_err(|e| MnemeError::Index(format!("bm25 add: {e}")))?;
-                    writer
-                        .commit()
-                        .map_err(|e| MnemeError::Index(format!("bm25 commit: {e}")))?;
-                }
-                self.reader
-                    .reload()
-                    .map_err(|e| MnemeError::Index(format!("bm25 reload: {e}")))?;
-            }
-            Event::MemoryInvalidated { id, .. } => {
-                let term = Term::from_field_text(self.fields.memory_id, &id.0.to_string());
-                {
-                    let mut writer = self
-                        .writer
-                        .lock()
-                        .map_err(|e| MnemeError::Index(format!("bm25 writer poisoned: {e}")))?;
-                    writer.delete_term(term);
-                    writer
-                        .commit()
-                        .map_err(|e| MnemeError::Index(format!("bm25 commit: {e}")))?;
-                }
-                self.reader
-                    .reload()
-                    .map_err(|e| MnemeError::Index(format!("bm25 reload: {e}")))?;
-            }
-            _ => {}
+        // Live write path: stage the one entry and flush it immediately so it's
+        // searchable right away. Bulk replay-rebuilds use `stage` + a single
+        // `commit` instead (see those methods).
+        if self.stage(entry)? {
+            self.commit()?;
         }
-        *self
-            .last_checkpoint
-            .write()
-            .map_err(|e| MnemeError::Index(format!("checkpoint lock poisoned: {e}")))? =
-            Some(entry.id);
         Ok(())
     }
 
@@ -537,6 +562,54 @@ mod tests {
         assert!(!hits.is_empty(), "expected a hit for 'revenue'");
         assert_eq!(hits[0].memory, a_ref);
         assert_eq!(hits[0].breakdown[0].0, "bm25");
+    }
+
+    #[tokio::test]
+    async fn staged_writes_are_invisible_until_commit_then_searchable() {
+        // The bulk replay-rebuild path: stage many docs without committing,
+        // commit once. Staged docs must not be searchable until the commit, and
+        // must all be searchable after it — matching the per-doc `apply` result.
+        let view = Bm25View::new().unwrap();
+        let scope = Scope::global("test");
+
+        let a = mem_with(
+            "quarterly revenue grew sharply",
+            &["revenue"],
+            scope.clone(),
+        );
+        let a_ref = MemoryRef(a.id);
+        let b = mem_with("logistics network expanded", &["operations"], scope.clone());
+        let b_ref = MemoryRef(b.id);
+
+        assert!(view.stage(&entry(Event::MemoryWritten(a))).unwrap());
+        assert!(view.stage(&entry(Event::MemoryWritten(b))).unwrap());
+
+        // Nothing committed yet → nothing searchable.
+        assert!(
+            view.search("revenue", 5, &scope).unwrap().is_empty(),
+            "staged-but-uncommitted docs must not be searchable"
+        );
+
+        view.commit().unwrap();
+
+        let rev = view.search("revenue", 5, &scope).unwrap();
+        assert_eq!(rev.first().map(|h| h.memory), Some(a_ref));
+        let log = view.search("logistics", 5, &scope).unwrap();
+        assert_eq!(log.first().map(|h| h.memory), Some(b_ref));
+    }
+
+    #[tokio::test]
+    async fn stage_returns_false_for_unrelated_events() {
+        let view = Bm25View::new().unwrap();
+        // An event the BM25 view doesn't index advances the checkpoint but
+        // stages no document.
+        let changed = view
+            .stage(&entry(Event::MemoryInvalidated {
+                id: MemoryRef(new_id()),
+                reason: "test".into(),
+            }))
+            .unwrap();
+        assert!(changed, "invalidation is an indexed change");
     }
 
     #[tokio::test]

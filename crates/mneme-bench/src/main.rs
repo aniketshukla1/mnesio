@@ -112,12 +112,13 @@ async fn cmd_scale(opts: ScaleOpts) -> Result<()> {
         eprintln!("# … ingesting {n} memories (embedder={})", opts.embedder);
         let r = run_scale_point(n, opts.seed, opts.k, &opts.embedder).await?;
         eprintln!(
-            "#   N={:<7} append={:.0}/s (p50 {:.2}ms)  index={:.0}/s (p50 {:.2}ms)  q_p50={:.2}ms q_p99={:.2}ms  recall@{}={:.1}%  slots={}",
+            "#   N={:<7} append={:.0}/s (p50 {:.2}ms)  index={:.0}/s (p50 {:.2}ms, commit {:.0}ms)  q_p50={:.2}ms q_p99={:.2}ms  recall@{}={:.1}%  slots={}",
             r.ingested,
             r.append_throughput_per_sec,
             r.append_p50_ms,
             r.index_throughput_per_sec,
             r.index_p50_ms,
+            r.index_commit_ms,
             r.query_p50_ms,
             r.query_p99_ms,
             r.k,

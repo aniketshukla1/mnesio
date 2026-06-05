@@ -114,17 +114,18 @@ real questions.
 
 ### Scale sweep — synthetic corpus, mock embedder
 
-| Memories | Append/s | Append p50 | Index/s | Query p50 | Query p99 | recall@10 |
-|---:|---:|---:|---:|---:|---:|---:|
-| 1,050 | 281,696 | 0.0017 ms | 347 | 1.31 ms | 4.14 ms | 100% |
-| 5,251 | 362,234 | 0.0017 ms | 361 | 1.56 ms | 2.41 ms | 100% |
-| 10,503 | 351,811 | 0.0017 ms | 303 | 2.04 ms | 3.19 ms | 100% |
-| 26,257 | 355,142 | 0.0017 ms | 298 | 3.04 ms | 4.82 ms | 100% |
-| 52,515 | 286,220 | 0.0017 ms | 265 | 4.04 ms | 12.9 ms | 100% |
+| Memories | Append/s | Append p50 | Index/s | Index p50 | Query p50 | Query p99 | recall@10 |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1,050 | 218,082 | 0.0022 ms | 7,648 | 0.13 ms | 0.88 ms | 1.76 ms | 100% |
+| 10,503 | 385,546 | 0.0017 ms | 2,725 | 0.35 ms | 1.36 ms | 4.20 ms | 100% |
+| 52,515 | 246,886 | 0.0018 ms | 1,625 | 0.60 ms | 2.21 ms | 2.96 ms | 100% |
+| 105,030 | 299,564 | 0.0017 ms | 1,326 | 0.75 ms | 3.60 ms | 4.90 ms | 100% |
 
-**Append latency is flat (~0.0017 ms p50) across a 50× size increase** — the
-write path doesn't degrade with corpus size. Query latency grows *sub-linearly*
-(HNSW). Recall holds at 100% on the exact-gold needle set.
+**Append latency is flat (~0.0017 ms p50) across a 100× size increase** — the
+write path doesn't degrade with corpus size. Index build is HNSW-bound (the
+BM25 commit is batched once per build, not per doc) and degrades gracefully.
+Query latency grows *sub-linearly* (HNSW). Recall holds at **100%** on the
+exact-gold needle set through 105k memories.
 
 ---
 

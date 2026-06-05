@@ -63,7 +63,18 @@ impl VectorView {
     /// when the custom filtered-HNSW variant lands (Phase 3) and again when
     /// real workloads inform the tuning.
     pub fn new(dim: usize, model_id: impl Into<String>) -> Self {
-        let hnsw = Hnsw::<'static, f32, DistL2>::new(16, 100_000, 16, 200, DistL2);
+        Self::with_capacity(dim, model_id, 100_000)
+    }
+
+    /// Like [`new`](Self::new) but sizes the HNSW for an expected `capacity`.
+    ///
+    /// `hnsw_rs` takes a `max_elements` hint at construction; the default
+    /// (100k) is right for an interactive demo but a bulk replay-rebuild of a
+    /// larger corpus should pre-size to avoid reallocation churn. Bulk paths
+    /// (e.g. the scale harness, a full view rebuild) pass the known corpus
+    /// size; the floor of 100k keeps small views on the tuned defaults.
+    pub fn with_capacity(dim: usize, model_id: impl Into<String>, capacity: usize) -> Self {
+        let hnsw = Hnsw::<'static, f32, DistL2>::new(16, capacity.max(100_000), 16, 200, DistL2);
         Self {
             index: RwLock::new(hnsw),
             slots: RwLock::new(Vec::new()),

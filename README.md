@@ -417,33 +417,36 @@ cargo run -p mneme-bench --features fetch --release -- \
 Real semantic embeddings lift recall +4.2 points over keyword-only on the same
 real questions — the hybrid path earning its keep on non-synthetic data.
 
-### Scale & load — synthetic corpus up to 52k memories
+### Scale & load — synthetic corpus up to 105k memories
 
 `mneme-bench scale` ingests a deterministic synthetic corpus (labeled needles
 salted among distractors, plus evolution chains + contradictions) through the
 real storage→views→retriever path, and **separates the two write phases** so
 the numbers reflect mneme's architecture: the *append* path is the user-facing
 write (Hard Rule #5, <5ms), while *index build* (HNSW + BM25) is what the
-server does asynchronously off the write path.
+server does asynchronously off the write path. The index phase uses the bulk
+replay-rebuild path (stage all docs, one BM25 commit), so its throughput is
+HNSW-bound rather than dominated by per-document segment flushes.
 
 ```bash
-cargo run -p mneme-bench --release -- scale --sizes 1000,10000,50000 --embedder mock
+cargo run -p mneme-bench --release -- scale --sizes 1000,10000,50000,100000 --embedder mock
 ```
 
-| Memories | Append/s | Append p50 | Index/s | Query p50 | Query p99 | recall@10 |
-|---:|---:|---:|---:|---:|---:|---:|
-| 1,050 | 281,696 | 0.0017 ms | 347 | 1.31 ms | 4.14 ms | 100% |
-| 5,251 | 362,234 | 0.0017 ms | 361 | 1.56 ms | 2.41 ms | 100% |
-| 10,503 | 351,811 | 0.0017 ms | 303 | 2.04 ms | 3.19 ms | 100% |
-| 26,257 | 355,142 | 0.0017 ms | 298 | 3.04 ms | 4.82 ms | 100% |
-| 52,515 | 286,220 | 0.0017 ms | 265 | 4.04 ms | 12.9 ms | 100% |
+| Memories | Append/s | Append p50 | Index/s | Index p50 | Query p50 | Query p99 | recall@10 |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1,050 | 218,082 | 0.0022 ms | 7,648 | 0.13 ms | 0.88 ms | 1.76 ms | 100% |
+| 10,503 | 385,546 | 0.0017 ms | 2,725 | 0.35 ms | 1.36 ms | 4.20 ms | 100% |
+| 52,515 | 246,886 | 0.0018 ms | 1,625 | 0.60 ms | 2.21 ms | 2.96 ms | 100% |
+| 105,030 | 299,564 | 0.0017 ms | 1,326 | 0.75 ms | 3.60 ms | 4.90 ms | 100% |
 
-Read of the curve: **append latency is flat (~0.0017 ms p50) across a 50×
+Read of the curve: **append latency is flat (~0.0017 ms p50) across a 100×
 size increase** — the write path genuinely doesn't degrade with corpus size.
-Query latency grows *sub-linearly* (HNSW): p50 1.3 ms → 4.0 ms from 1k to 52k.
-Recall stays 100% on the exact-gold needle set, confirming retrieval
-correctness holds at scale. (The synthetic generator is deterministic — same
-`--seed` reproduces the identical corpus.)
+Index build is HNSW-bound and degrades gracefully (per-insert p50 0.13 ms →
+0.75 ms as the graph deepens). Query latency grows *sub-linearly* (HNSW): p50
+0.88 ms → 3.60 ms from 1k to 105k. Recall stays **100%** on the exact-gold
+needle set through 105k memories, confirming retrieval correctness holds at
+scale. (The synthetic generator is deterministic — same `--seed` reproduces
+the identical corpus.)
 
 ---
 
@@ -481,7 +484,7 @@ The frontier layer (10–15) is what a storage-shaped competitor (Mem0, Zep, Let
 ```
 mneme-core        :   3 tests
 mneme-llm         :  11 tests
-mneme-index       :  80 tests
+mneme-index       :  82 tests
 mneme-evolve      :  27 tests
 mneme-procedural  : 107 tests
 mneme-causal      :  15 tests
@@ -500,7 +503,7 @@ mneme-extract     :  33 tests
 mneme-privacy     :  19 tests
 sdk/node (TS)     :   8 tests (offline, stub fetch)
 ──────────────────────────────
-TOTAL             : 456 Rust tests (453 on --no-default-features) + 8 SDK tests · all passing
+TOTAL             : 458 Rust tests (455 on --no-default-features) + 8 SDK tests · all passing
                     (+4 more with --features fetch on mneme-bench)
 ```
 

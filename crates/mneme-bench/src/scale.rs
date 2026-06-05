@@ -57,6 +57,9 @@ pub struct ScaleReport {
     pub index_throughput_per_sec: f64,
     pub index_p50_ms: f64,
     pub index_p95_ms: f64,
+    /// One-time BM25 commit (segment flush) at the end of the bulk build,
+    /// amortized out of the per-entry `index_p*` figures.
+    pub index_commit_ms: f64,
 
     // query
     pub query_p50_ms: f64,
@@ -116,9 +119,12 @@ pub async fn run_scale_point(
 
     let dir = std::env::temp_dir().join(format!("mneme-scale-{}", new_id()));
     let log = FjallEventLog::open(&dir).map_err(|e| anyhow!("open log: {e}"))?;
-    let vector = Arc::new(VectorView::new(
+    // Pre-size the HNSW for the known corpus so a 100k+ stress point doesn't
+    // pay reallocation churn (the default hint is 100k).
+    let vector = Arc::new(VectorView::with_capacity(
         embedder.dim(),
         embedder.model_id().to_string(),
+        corpus.memories.len() + 16,
     ));
     let bm25 = Arc::new(Bm25View::new().map_err(|e| anyhow!("bm25 init: {e}"))?);
 
@@ -185,10 +191,14 @@ pub async fn run_scale_point(
     }
     let append_secs = append_start.elapsed().as_secs_f64();
 
-    // Phase 2 — INDEX BUILD: apply each entry to the vector (HNSW) + BM25 views.
-    // In the server this is the async embedding/index workers, *off* the write
-    // path; timed separately so HNSW build cost is visible, not blamed on the
-    // append.
+    // Phase 2 — INDEX BUILD (bulk replay-rebuild). Apply each entry to the
+    // vector (HNSW insert) + BM25 (stage, no per-doc commit), then commit BM25
+    // **once**. In the server this is the async embedding/index workers, *off*
+    // the write path; timed separately so the build cost is visible, not blamed
+    // on the append. The per-entry latency below is the add cost with the
+    // segment-flush commit amortized out (committing per doc turns an O(N)
+    // ingest into O(N) tantivy segment flushes — see `Bm25View::stage`); the
+    // one-time commit is reported separately as `index_commit_ms`.
     let index_start = Instant::now();
     for entry in &entries {
         let w = Instant::now();
@@ -196,11 +206,12 @@ pub async fn run_scale_point(
             .apply(entry)
             .await
             .map_err(|e| anyhow!("vector apply: {e}"))?;
-        bm25.apply(entry)
-            .await
-            .map_err(|e| anyhow!("bm25 apply: {e}"))?;
+        bm25.stage(entry).map_err(|e| anyhow!("bm25 stage: {e}"))?;
         index_latencies_ms.push(w.elapsed().as_secs_f64() * 1000.0);
     }
+    let commit_start = Instant::now();
+    bm25.commit().map_err(|e| anyhow!("bm25 commit: {e}"))?;
+    let index_commit_ms = commit_start.elapsed().as_secs_f64() * 1000.0;
     let index_secs = index_start.elapsed().as_secs_f64();
 
     let retriever = HybridRetriever::new(vector.clone(), bm25, embedder.clone());
@@ -254,6 +265,7 @@ pub async fn run_scale_point(
         index_throughput_per_sec: per_sec(ingested, index_secs),
         index_p50_ms: percentile(&index_latencies_ms, 50.0),
         index_p95_ms: percentile(&index_latencies_ms, 95.0),
+        index_commit_ms,
         query_p50_ms: percentile(&query_latencies_ms, 50.0),
         query_p95_ms: percentile(&query_latencies_ms, 95.0),
         query_p99_ms: percentile(&query_latencies_ms, 99.0),
@@ -272,7 +284,7 @@ pub async fn run_scale_point(
 pub fn scale_csv_header() -> String {
     "n,embedder,k,ingested,needles,\
      append_secs,append_per_sec,append_p50_ms,append_p95_ms,\
-     index_secs,index_per_sec,index_p50_ms,index_p95_ms,\
+     index_secs,index_per_sec,index_p50_ms,index_p95_ms,index_commit_ms,\
      query_p50_ms,query_p95_ms,query_p99_ms,recall,slot_count,live_count,tombstones"
         .to_string()
 }
@@ -282,7 +294,7 @@ pub fn scale_csv_row(r: &ScaleReport) -> String {
     format!(
         "{},{},{},{},{},\
          {:.3},{:.1},{:.4},{:.4},\
-         {:.3},{:.1},{:.4},{:.4},\
+         {:.3},{:.1},{:.4},{:.4},{:.3},\
          {:.4},{:.4},{:.4},{:.4},{},{},{}",
         r.n,
         r.embedder,
@@ -297,6 +309,7 @@ pub fn scale_csv_row(r: &ScaleReport) -> String {
         r.index_throughput_per_sec,
         r.index_p50_ms,
         r.index_p95_ms,
+        r.index_commit_ms,
         r.query_p50_ms,
         r.query_p95_ms,
         r.query_p99_ms,
@@ -373,6 +386,7 @@ mod tests {
             index_throughput_per_sec: 10.0,
             index_p50_ms: 0.1,
             index_p95_ms: 0.2,
+            index_commit_ms: 0.5,
             query_p50_ms: 0.1,
             query_p95_ms: 0.2,
             query_p99_ms: 0.3,
