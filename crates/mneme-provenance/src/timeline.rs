@@ -421,6 +421,48 @@ mod tests {
     }
 
     #[test]
+    fn forgetting_unknown_or_multiple_subjects_is_safe() {
+        let a = mem("alice account 12345", None);
+        let b = mem("bob ledger entry", None);
+        let p = mem("public earnings note", None);
+        let entries = vec![
+            entry(Event::MemoryWritten(a)),
+            entry(Event::MemoryWritten(b)),
+            entry(Event::MemoryWritten(p)),
+        ];
+        let tl = Timeline::from_entries(&entries, subject_by_marker);
+        let before = tl.entry_count();
+
+        // Forget a subject that isn't in the timeline at all, plus two that
+        // are — chained. Must not panic and must not touch the log.
+        let policy = RedactionPolicy::new()
+            .forget("ghost-never-here")
+            .forget("alice")
+            .forget("bob");
+
+        let now = tl.live_now(&policy);
+        assert_eq!(
+            now.iter().find(|v| v.subject == "alice").unwrap().content,
+            RedactionPolicy::REDACTED
+        );
+        assert_eq!(
+            now.iter().find(|v| v.subject == "bob").unwrap().content,
+            RedactionPolicy::REDACTED
+        );
+        // The unrelated public memory is untouched; the unknown subject is a
+        // no-op (nothing to redact).
+        assert_eq!(
+            now.iter().find(|v| v.subject == "public").unwrap().content,
+            "public earnings note"
+        );
+        assert_eq!(tl.entry_count(), before, "append-only: log unchanged");
+
+        // Redaction is a pure read — re-snapshotting yields the same result.
+        let again = tl.live_now(&policy);
+        assert_eq!(now.len(), again.len());
+    }
+
+    #[test]
     fn provenance_chain_traces_write_evolve_invalidate() {
         // A → evolves into B; A is then invalidated.
         let a = mem("Acme revenue up 18%", None);

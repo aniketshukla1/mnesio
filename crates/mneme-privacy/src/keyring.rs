@@ -307,4 +307,55 @@ mod tests {
         assert_ne!(&ct[..], &pt[..], "ciphertext should differ from plaintext");
         assert_eq!(c.decrypt(&key, &nonce, &ct).unwrap(), pt);
     }
+
+    // --- erasure edge cases ------------------------------------------------
+
+    #[test]
+    fn forget_erases_every_sealed_box_for_subject() {
+        // A subject sealed many times (e.g. one box per turn, across "all T")
+        // must become unreadable *everywhere* after a single forget — one key
+        // backs all their boxes, so destroying it shreds the lot.
+        let kr = Keyring::new();
+        let boxes: Vec<_> = (0..16)
+            .map(|i| kr.seal("alice", format!("secret #{i}").as_bytes()).unwrap())
+            .collect();
+        assert!(
+            boxes.iter().all(|b| kr.open(b).is_some()),
+            "all readable pre-forget"
+        );
+
+        kr.forget("alice");
+
+        assert!(
+            boxes.iter().all(|b| kr.open(b).is_none()),
+            "every one of the subject's sealed boxes must be unreadable after forget"
+        );
+    }
+
+    #[test]
+    fn forget_unknown_subject_is_safe_and_sticky() {
+        // Forgetting a subject that was never sealed must not panic; it reports
+        // "no key destroyed" but still tombstones the id, so a later seal is
+        // refused (you can't un-forget by being late to the party).
+        let kr = Keyring::new();
+        assert!(!kr.forget("never-sealed"), "no key existed to destroy");
+        assert!(kr.is_forgotten("never-sealed"));
+        assert!(
+            kr.seal("never-sealed", b"too late").is_none(),
+            "forget is sticky even when it preceded any seal"
+        );
+    }
+
+    #[test]
+    fn empty_plaintext_seals_opens_and_forgets() {
+        let kr = Keyring::new();
+        let sealed = kr.seal("alice", b"").unwrap();
+        assert_eq!(
+            kr.open(&sealed).as_deref(),
+            Some(""),
+            "empty content round-trips"
+        );
+        kr.forget("alice");
+        assert_eq!(kr.open(&sealed), None, "empty content is still shredded");
+    }
 }
