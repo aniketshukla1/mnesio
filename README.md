@@ -594,24 +594,24 @@ mneme-core        :   3 tests
 mneme-llm         :  11 tests
 mneme-index       :  83 tests
 mneme-evolve      :  27 tests
-mneme-procedural  : 107 tests
+mneme-procedural  : 111 tests
 mneme-causal      :  15 tests
 mneme-probe       :  14 tests
 mneme-kv          :  10 tests
 mneme-exchange    :  11 tests
 mneme-dream       :  10 tests
-mneme-provenance  :   7 tests
+mneme-provenance  :   8 tests
 mneme-bench       :  25 tests (+7 under --features fetch: SQuAD + HotpotQA loaders)
-mneme-mcp         :  26 tests (unit + integration)
+mneme-mcp         :  33 tests (unit + integration)
 mneme-py          :   7 tests (Rust-side inner-client coverage)
 mneme-server      :  27 tests
 mneme-store       :   1 test
 mneme-graph       :  27 tests
 mneme-extract     :  33 tests
-mneme-privacy     :  19 tests
+mneme-privacy     :  22 tests
 sdk/node (TS)     :   8 tests (offline, stub fetch)
 ──────────────────────────────
-TOTAL             : 463 Rust tests (460 on --no-default-features) + 8 SDK tests · all passing
+TOTAL             : 478 Rust tests (475 on --no-default-features) + 8 SDK tests · all passing
                     (+7 more with --features fetch on mneme-bench)
 ```
 
