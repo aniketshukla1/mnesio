@@ -46,11 +46,20 @@
 //!   representation. Weights download once (cached) via `hf-hub`; all crypto/ML
 //!   deps are feature-gated so the default build stays light + offline.
 //!
-//! The remaining lift is **full-model generative use** of the cartridge —
-//! loading the cache into an N-layer model's attention so it *generates* from
-//! it (vs. the layer-0 retrieval here). That's why Phase 12 stays ◑. The
-//! reconciliations that make KV memory *shippable* are proven, the tensor math
-//! is real, and real pretrained weights now drive the cache.
+//! - [`GenerativeKvBackend`] *(feature `generative-kv`)* — the deepest lift:
+//!   the cartridge **is** GPT-2's key/value cache. `compile_blob` runs the
+//!   **full 12-layer forward** over the (post-shred) context to prefill a KV
+//!   cache for every layer; `answer` restores that cache and *generates* the
+//!   query continuation, each new token attending over the cartridge. Proven by
+//!   a self-consistency oracle: generating from the cartridge is **token-
+//!   identical** to processing the full `context ++ query` prompt from scratch
+//!   (KV caching is exact), so the cartridge is a faithful — and cheaper —
+//!   substitute that skips the prefix recompute on every query. Erasure is
+//!   reconciled the same way: shred a subject's key, recompile, and the rebuilt
+//!   cache can no longer *generate* the erased fact.
+//!
+//! That closes the last open piece of Phase 12: the cartridge is no longer a
+//! retrieval index over a cache — it is the cache the model generates from.
 //!
 //! ## Hard-rule posture
 //!
@@ -64,6 +73,8 @@
 //! - **#7 (swappable seam):** the tensor backend is a trait.
 
 mod cartridge;
+#[cfg(feature = "generative-kv")]
+mod generative;
 #[cfg(feature = "pretrained-kv")]
 mod pretrained;
 mod store;
@@ -73,6 +84,8 @@ pub use cartridge::{
     compile, Cartridge, CartridgeKey, CartridgeStatus, CompileError, FakeKvBackend, KvAnswer,
     KvBackend, SealedMemory,
 };
+#[cfg(feature = "generative-kv")]
+pub use generative::GenerativeKvBackend;
 #[cfg(feature = "pretrained-kv")]
 pub use pretrained::PretrainedKvBackend;
 pub use store::{ActivateError, CartridgeStore};

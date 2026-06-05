@@ -24,6 +24,10 @@ anyhow = { workspace = true, optional = true }
 
 [features]
 pretrained-kv = ["dep:safetensors", "dep:tokenizers", "dep:hf-hub", "dep:anyhow"]
+# Full GPT-2 forward + generation with a serializable KV cache (the cartridge
+# literally *is* the cache). Heavier than `pretrained-kv` (all 12 layers + a
+# generation loop); same optional deps.
+generative-kv = ["dep:safetensors", "dep:tokenizers", "dep:hf-hub", "dep:anyhow"]
 
 [dev-dependencies]
 tokio = { workspace = true }
