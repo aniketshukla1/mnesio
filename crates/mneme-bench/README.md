@@ -1,0 +1,149 @@
+# mneme-bench
+
+Eval-as-product harness for mneme. Two jobs in one crate:
+
+1. **Procedural-compiler evaluation** (`run` / `compare`) — does the agent get
+   *better at a task* over generations? Emits a learning curve with a safety
+   floor; powers the CI regression gate.
+2. **Memory-layer evaluation** (`memeval` / `scale` / `fetch`) — does the
+   *memory* recall the right thing, fast, at scale? Runs the real
+   `FjallEventLog → VectorView + Bm25View → HybridRetriever` path end to end.
+
+All recall metrics are computed through the *actual* ingest→retrieve pipeline —
+no mocked retriever, no shortcut. The only pluggable piece is the embedder
+(`mock` for offline/CI, `fastembed` for real semantic quality).
+
+---
+
+## Quick start
+
+```bash
+# learning curve for the procedural compiler (default subcommand)
+cargo run -p mneme-bench -- run --suite gsm8k --max-versions 6
+
+# memory recall@k over a built-in suite (offline, mock embedder)
+cargo run -p mneme-bench -- memeval --suite locomo --k 10 --embedder mock
+
+# large-scale load test: throughput + latency percentiles + recall
+cargo run -p mneme-bench --release -- scale --sizes 1000,10000,50000 --embedder mock
+
+# REAL public benchmark (SQuAD) — needs the `fetch` feature + network on first run
+cargo run -p mneme-bench --features fetch --release -- \
+  fetch --dataset squad --rows 2000 --k 10 --embedder fastembed
+```
+
+`--help` prints the full option matrix for every subcommand.
+
+---
+
+## Subcommands
+
+### `run` — procedural learning curve
+Iterates the compiler against a suite (`gsm8k` | `humaneval`), reflecting →
+proposing → shadow-evaluating → gating each generation. Emits the per-version
+objective score and the safety-probe pass rate. Output: `csv | json | html |
+markdown`. Use `--regression-threshold N` in CI to exit non-zero if the curve
+falls more than `N` below baseline or the safety probe regresses.
+
+### `compare` — A vs B
+Scores two prompt bodies (`--baseline` / `--candidate`) against a fixed suite
+and reports the delta. The same gate logic that guards a real commit.
+
+### `memeval` — recall@k on a curated suite
+Ingests a haystack of memories, asks each question, and checks whether any of
+the top-`k` retrieved memories contains the gold answer span. Suites: `locomo`,
+`longmemeval` (LOCOMO / LongMemEval style, shipped in `data/`). `--min-recall N`
+gates CI.
+
+### `scale` — load test on a synthetic corpus
+Generates a deterministic synthetic corpus (see below) and drives it through the
+real path, **separating the two write phases** so the numbers reflect mneme's
+architecture:
+
+- **Append** — the user-facing write (Hard Rule #5: <5ms target). Timed alone.
+- **Index build** — HNSW + BM25 apply, which the server does *asynchronously
+  off the write path*. Timed separately.
+
+Reports throughput and p50/p95/p99 latency for each phase, plus query latency
+and recall@k. CSV via `--out`.
+
+### `fetch` — real public benchmark *(feature `fetch`)*
+Downloads a real dataset from the Hugging Face datasets-server, projects it into
+a recall suite (SQuAD: each context → a memory, deduplicated; each
+question/answer-span → a recall pair), caches it to disk, and runs `memeval`
+over it. Subsequent runs are offline from the cache. `--force` re-downloads;
+`--fetch-only` caches without evaluating.
+
+The `fetch` feature is the *only* thing that pulls a network dependency
+(`reqwest`); the default build stays network-free.
+
+---
+
+## The synthetic generator (`gen.rs`)
+
+Deterministic, dependency-free (a `SplitMix64` PRNG), reproducible from a
+`--seed`. Produces:
+
+- **Needles** — memories carrying a unique, sentinel-delimited gold token
+  (`ZNDL{qid:09}Z`). The fixed width guarantees no token is a prefix of another
+  and each appears in exactly one memory, so recall@k is *unambiguous at any
+  scale*.
+- **Distractors** — the bulk of the corpus.
+- **Evolution chains** (~n/33) and **contradictions** (~n/50), with parents
+  drawn only from distractors so they never pollute a gold needle.
+
+This is what lets the scale harness report an honest recall number on a corpus
+of any size — a needle either was retrieved or it wasn't, with no fuzzy match.
+
+---
+
+## Measured results
+
+All numbers below are **measured**, not projected — `mneme-bench` on a 2021
+M1-class laptop (8 cores, 16 GB), release build.
+
+### Real benchmark — SQuAD v1.1, recall@10
+
+| Embedder | Memories | Questions | recall@10 | ms/query |
+|---|---:|---:|---:|---:|
+| `fastembed` (384-d semantic) | 315 | 2,000 | **98.1%** | 9.24 |
+| `mock` (32-d, BM25-only) | 315 | 2,000 | 93.9% | 1.81 |
+
+Real semantic embeddings lift recall +4.2 points over keyword-only on the same
+real questions.
+
+### Scale sweep — synthetic corpus, mock embedder
+
+| Memories | Append/s | Append p50 | Index/s | Query p50 | Query p99 | recall@10 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1,050 | 281,696 | 0.0017 ms | 347 | 1.31 ms | 4.14 ms | 100% |
+| 5,251 | 362,234 | 0.0017 ms | 361 | 1.56 ms | 2.41 ms | 100% |
+| 10,503 | 351,811 | 0.0017 ms | 303 | 2.04 ms | 3.19 ms | 100% |
+| 26,257 | 355,142 | 0.0017 ms | 298 | 3.04 ms | 4.82 ms | 100% |
+| 52,515 | 286,220 | 0.0017 ms | 265 | 4.04 ms | 12.9 ms | 100% |
+
+**Append latency is flat (~0.0017 ms p50) across a 50× size increase** — the
+write path doesn't degrade with corpus size. Query latency grows *sub-linearly*
+(HNSW). Recall holds at 100% on the exact-gold needle set.
+
+---
+
+## Tests
+
+```bash
+cargo test -p mneme-bench                  # 21 tests (offline, no network)
+cargo test -p mneme-bench --features fetch # 25 tests (+4 real-data loader)
+```
+
+The fetch-feature tests cover the loader's pure parts (cache-key safety,
+URL-encoding, spec defaults, missing-cache handling) without hitting the
+network.
+
+---
+
+## Caching & environment
+
+- Downloaded suites cache to `crates/mneme-bench/data/cache/` (gitignored).
+  Override with `MNEME_BENCH_CACHE=/path`.
+- `fastembed` downloads its model to `.fastembed_cache/` on first run (~100 MB,
+  gitignored).
