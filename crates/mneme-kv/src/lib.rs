@@ -39,13 +39,18 @@
 //!   that cache. The blob is real KV-cache bytes whose size tracks token count,
 //!   so erasure genuinely shrinks it. Still dependency-free and pure Rust.
 //!
-//! What's *not* yet done is the **pretrained weights**: `TensorKvBackend` uses
-//! content-derived embeddings + fixed seeded projections (retrieval tracks
-//! token overlap, not trained semantics; Q shares K's projection). Loading a
-//! real open-weights model's embedding + Wq/Wk/Wv behind this same
-//! `compile_blob`/`answer` path is the one remaining lift — a weights load, not
-//! an architecture change. We claim the reconciliations that make KV memory
-//! *shippable* are proven, and the tensor math is now real.
+//! - [`PretrainedKvBackend`] *(feature `pretrained-kv`)* — removes the
+//!   "untrained" caveat: it loads **real GPT-2 open weights** (token + position
+//!   embeddings and the layer-0 `c_attn` Q/K/V projection), runs the actual
+//!   forward to build the K/V cache, and retrieves over GPT-2's *learned*
+//!   representation. Weights download once (cached) via `hf-hub`; all crypto/ML
+//!   deps are feature-gated so the default build stays light + offline.
+//!
+//! The remaining lift is **full-model generative use** of the cartridge —
+//! loading the cache into an N-layer model's attention so it *generates* from
+//! it (vs. the layer-0 retrieval here). That's why Phase 12 stays ◑. The
+//! reconciliations that make KV memory *shippable* are proven, the tensor math
+//! is real, and real pretrained weights now drive the cache.
 //!
 //! ## Hard-rule posture
 //!
@@ -59,6 +64,8 @@
 //! - **#7 (swappable seam):** the tensor backend is a trait.
 
 mod cartridge;
+#[cfg(feature = "pretrained-kv")]
+mod pretrained;
 mod store;
 mod tensor;
 
@@ -66,5 +73,7 @@ pub use cartridge::{
     compile, Cartridge, CartridgeKey, CartridgeStatus, CompileError, FakeKvBackend, KvAnswer,
     KvBackend, SealedMemory,
 };
+#[cfg(feature = "pretrained-kv")]
+pub use pretrained::PretrainedKvBackend;
 pub use store::{ActivateError, CartridgeStore};
 pub use tensor::{TensorConfig, TensorKvBackend};
