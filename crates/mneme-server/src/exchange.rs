@@ -27,12 +27,35 @@ use axum::Json;
 use mneme_core::entity::{ArtifactKind, Canary, PolicyArtifact};
 use mneme_core::event::EvalReport;
 use mneme_core::Scope;
-use mneme_exchange::{export, import, FakeCanaryRunner, FakeSigner, LocalEvaluation};
+#[cfg(not(feature = "ed25519"))]
+use mneme_exchange::FakeSigner;
+use mneme_exchange::{export, import, FakeCanaryRunner, LocalEvaluation};
 use mneme_procedural::EvalGates;
 use serde::Serialize;
 use std::sync::Arc;
 
 const ISSUER: &str = "instance-A";
+
+/// Which `Signer` backs the certificate — surfaced in the report.
+#[cfg(feature = "ed25519")]
+const SIGNER_KIND: &str = "ed25519";
+#[cfg(not(feature = "ed25519"))]
+const SIGNER_KIND: &str = "fake-digest";
+
+/// Build the active signer. Default = the offline `FakeSigner`. With
+/// `--features ed25519`, a real ed25519 signer that trusts its own public key
+/// as the demo issuer — so in this single-process showcase the same instance
+/// both signs (as A) and verifies (as B).
+#[cfg(not(feature = "ed25519"))]
+fn build_signer() -> Box<dyn mneme_exchange::Signer> {
+    Box::new(FakeSigner::new())
+}
+#[cfg(feature = "ed25519")]
+fn build_signer() -> Box<dyn mneme_exchange::Signer> {
+    let s = mneme_exchange::Ed25519Signer::from_seed([13u8; 32]);
+    s.trust(ISSUER, s.verifying_key());
+    Box::new(s)
+}
 
 /// The issuer's (committable) report claim that accompanies the certificate.
 fn issuer_report(canaries_total: u32) -> EvalReport {
@@ -115,9 +138,9 @@ pub async fn exchange_metrics(State(state): State<Arc<AppState>>) -> Response {
     let artifact_version = artifact.version;
 
     // --- instance A: export a signed certificate ---
-    let signer = FakeSigner::new();
+    let signer = build_signer();
     let cert = match export(
-        &signer,
+        signer.as_ref(),
         ISSUER,
         artifact.clone(),
         canaries.clone(),
@@ -136,7 +159,7 @@ pub async fn exchange_metrics(State(state): State<Arc<AppState>>) -> Response {
     // (1) clean import under B's default gate.
     let clean = import(
         &cert,
-        &signer,
+        signer.as_ref(),
         &runner,
         LocalEvaluation::default(),
         &EvalGates::default(),
@@ -151,7 +174,7 @@ pub async fn exchange_metrics(State(state): State<Arc<AppState>>) -> Response {
     };
     let tampered_res = import(
         &tampered,
-        &signer,
+        signer.as_ref(),
         &runner,
         LocalEvaluation::default(),
         &EvalGates::default(),
@@ -166,7 +189,7 @@ pub async fn exchange_metrics(State(state): State<Arc<AppState>>) -> Response {
     };
     let strict = import(
         &cert,
-        &signer,
+        signer.as_ref(),
         &runner,
         LocalEvaluation::default(),
         &strict_gate,
@@ -180,6 +203,7 @@ pub async fn exchange_metrics(State(state): State<Arc<AppState>>) -> Response {
         enabled: true,
         note: None,
         issuer: ISSUER.to_string(),
+        signer: SIGNER_KIND.to_string(),
         artifact_kind,
         artifact_version,
         canaries_total,
@@ -244,6 +268,9 @@ pub struct ExchangeReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     pub issuer: String,
+    /// Which `Signer` produced the certificate: `fake-digest` (offline default)
+    /// or `ed25519` (real signatures, with `--features ed25519`).
+    pub signer: String,
     pub artifact_kind: String,
     pub artifact_version: u32,
     pub canaries_total: u32,
@@ -272,6 +299,7 @@ impl ExchangeReport {
             enabled: false,
             note: Some(note),
             issuer: ISSUER.to_string(),
+            signer: SIGNER_KIND.to_string(),
             artifact_kind: String::new(),
             artifact_version: 0,
             canaries_total: 0,

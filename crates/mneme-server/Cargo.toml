@@ -16,6 +16,12 @@ default = ["ollama"]
 # slim builds that don't need the HTTP dependency tree — the worker
 # transparently falls back to `DemoLlmClient`.
 ollama = ["mneme-llm/ollama"]
+# Use the real, audited crypto behind the existing seams instead of the offline
+# stand-ins: ChaCha20-Poly1305 for the KV crypto-shred keyring (`aead`) and
+# ed25519 signatures for the skill-exchange certificate (`ed25519`). Default
+# keeps XorCipher / FakeSigner so the dep tree stays light.
+aead = ["mneme-privacy/aead"]
+ed25519 = ["mneme-exchange/ed25519"]
 
 [dependencies]
 mneme-core.workspace = true

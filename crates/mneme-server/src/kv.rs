@@ -27,6 +27,13 @@ use mneme_core::{EvalReport, Query as RetrievalQuery, Retriever, Scope};
 use mneme_kv::{compile, CartridgeKey, CartridgeStore, FakeKvBackend, KvBackend, SealedMemory};
 use mneme_privacy::Keyring;
 use serde::Serialize;
+
+/// Which `Cipher` backs the keyring — surfaced in the report so the live API
+/// shows whether the real AEAD is wired.
+#[cfg(feature = "aead")]
+const CIPHER_KIND: &str = "chacha20poly1305";
+#[cfg(not(feature = "aead"))]
+const CIPHER_KIND: &str = "xor";
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -114,8 +121,14 @@ pub async fn kv_metrics(State(state): State<Arc<AppState>>) -> Response {
 
     // Seal every memory under its per-subject key. The cartridge is compiled
     // from sealed boxes, so destroying a key removes that subject from any
-    // recompile (the crypto-shred reconciliation).
+    // recompile (the crypto-shred reconciliation). The cipher behind the
+    // keyring is the offline XorCipher by default, or the real ChaCha20-Poly1305
+    // AEAD when the server is built with `--features aead` — same protocol,
+    // same shred guarantee, authenticated encryption.
+    #[cfg(not(feature = "aead"))]
     let keyring = Keyring::new();
+    #[cfg(feature = "aead")]
+    let keyring = Keyring::with_cipher(mneme_privacy::ChaChaCipher);
     let mut sealed: Vec<SealedMemory> = Vec::new();
     for (id, content) in &live {
         let subject = subject_of(content);
@@ -211,6 +224,7 @@ pub async fn kv_metrics(State(state): State<Arc<AppState>>) -> Response {
         note: None,
         model_id: KV_MODEL_ID.to_string(),
         live_memories: live.len(),
+        cipher: CIPHER_KIND.to_string(),
         // facet 2: gate
         gate_committable,
         active_version: store.active_for(&key).map(|c| c.version).unwrap_or(0),
@@ -240,6 +254,9 @@ pub struct KvReport {
     pub note: Option<String>,
     pub model_id: String,
     pub live_memories: usize,
+    /// Which `Cipher` backs the crypto-shred keyring: `xor` (offline default)
+    /// or `chacha20poly1305` (real AEAD, with `--features aead`).
+    pub cipher: String,
 
     /// facet 2 — gate before activation (Hard Rule #1).
     pub gate_committable: bool,
@@ -270,6 +287,7 @@ impl KvReport {
             note: Some(note),
             model_id: KV_MODEL_ID.to_string(),
             live_memories: 0,
+            cipher: CIPHER_KIND.to_string(),
             gate_committable: false,
             active_version: 0,
             held_out_query: HELD_OUT_QUERY.to_string(),
