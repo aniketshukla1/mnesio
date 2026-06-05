@@ -71,3 +71,23 @@ jobs:
       # download is never triggered in CI. If a future test needs the
       # real embedder, gate it with `#[ignore]` so this matrix stays fast.
       - run: cargo test --workspace ${{ matrix.config.flags }}
+
+  bench-gate:
+    name: bench gate (recall floors)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bench-gate
+      # Eval-as-product gates, all offline (mock embedder, no model download):
+      # recall@k must clear a floor or the job fails. Floors are set with
+      # margin below the observed numbers (mini-suites recall 100%, synthetic
+      # scale recall 100%) so a real retrieval regression trips CI, not noise.
+      - name: memeval — LOCOMO recall floor
+        run: cargo run -p mneme-bench -- memeval --suite locomo --k 10 --embedder mock --min-recall 0.8
+      - name: memeval — LongMemEval recall floor
+        run: cargo run -p mneme-bench -- memeval --suite longmemeval --k 10 --embedder mock --min-recall 0.8
+      - name: scale — synthetic recall floor (2k)
+        run: cargo run -p mneme-bench -- scale --sizes 2000 --embedder mock --min-recall 0.95

@@ -21,6 +21,18 @@ use std::path::{Path, PathBuf};
 /// The datasets-server caps `length` per request; paginate in chunks of this.
 const PAGE: usize = 100;
 
+/// Which row shape a dataset uses, so [`download`] knows how to project it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DatasetKind {
+    /// SQuAD-shaped: `row.context` (string), `row.question`,
+    /// `row.answers.text[]`. Single-hop reading comprehension.
+    Squad,
+    /// HotpotQA-shaped: `row.context.{title[], sentences[][]}`, `row.question`,
+    /// `row.answer` (string). Multi-hop — each context paragraph becomes a
+    /// memory; yes/no comparison answers are skipped (not retrievable spans).
+    HotpotQa,
+}
+
 /// A dataset target: which HF dataset/config/split, and how to read its fields.
 #[derive(Debug, Clone)]
 pub struct FetchSpec {
@@ -30,6 +42,8 @@ pub struct FetchSpec {
     /// How many rows to pull (paginated). The resulting memory count is ≤ this
     /// (contexts are deduplicated).
     pub rows: usize,
+    /// The row shape, selecting the projection in [`download`].
+    pub kind: DatasetKind,
 }
 
 impl FetchSpec {
@@ -41,6 +55,20 @@ impl FetchSpec {
             config: "plain_text".to_string(),
             split: "validation".to_string(),
             rows,
+            kind: DatasetKind::Squad,
+        }
+    }
+
+    /// HotpotQA (distractor) — a **multi-hop** set: each row carries several
+    /// context paragraphs (one memory each), and the answer span must be found
+    /// across them. A harder retrieval test than single-hop SQuAD.
+    pub fn hotpotqa(rows: usize) -> Self {
+        Self {
+            dataset: "hotpotqa/hotpot_qa".to_string(),
+            config: "distractor".to_string(),
+            split: "validation".to_string(),
+            rows,
+            kind: DatasetKind::HotpotQa,
         }
     }
 
@@ -55,28 +83,20 @@ impl FetchSpec {
     }
 }
 
-// --- datasets-server JSON shapes (only the fields we read) ---
+// --- datasets-server JSON shapes ---
+//
+// Row shapes differ per dataset, so we deserialize each `row` as a generic
+// `serde_json::Value` and project it per [`DatasetKind`]. This keeps one
+// loader working across SQuAD-shaped and HotpotQA-shaped datasets.
 
 #[derive(Debug, Deserialize)]
 struct RowsResponse {
-    rows: Vec<RowEnvelope>,
+    rows: Vec<RawRow>,
 }
 
 #[derive(Debug, Deserialize)]
-struct RowEnvelope {
-    row: SquadRow,
-}
-
-#[derive(Debug, Deserialize)]
-struct SquadRow {
-    context: String,
-    question: String,
-    answers: SquadAnswers,
-}
-
-#[derive(Debug, Deserialize)]
-struct SquadAnswers {
-    text: Vec<String>,
+struct RawRow {
+    row: serde_json::Value,
 }
 
 /// Directory where fetched suites are cached. Honors `MNEME_BENCH_CACHE`, else
@@ -182,22 +202,14 @@ async fn download(spec: &FetchSpec) -> Result<MemEvalSuite> {
             break; // ran past the end of the split
         }
         for env in body.rows {
-            let r = env.row;
-            let answer = match r.answers.text.into_iter().next() {
-                Some(a) if !a.trim().is_empty() => a,
-                _ => continue, // skip unanswerable / malformed rows
-            };
-            if seen_contexts.insert(r.context.clone()) {
-                memories.push(MemItem {
-                    content: r.context.clone(),
-                    tags: vec!["squad".into(), "context".into()],
-                });
+            match spec.kind {
+                DatasetKind::Squad => {
+                    extract_squad(&env.row, &mut seen_contexts, &mut memories, &mut questions)
+                }
+                DatasetKind::HotpotQa => {
+                    extract_hotpotqa(&env.row, &mut seen_contexts, &mut memories, &mut questions)
+                }
             }
-            questions.push(MemQuestion {
-                question: r.question,
-                answer_substring: answer,
-                category: "reading-comprehension".to_string(),
-            });
         }
         offset += length;
     }
@@ -220,6 +232,98 @@ async fn download(spec: &FetchSpec) -> Result<MemEvalSuite> {
         memories,
         questions,
     })
+}
+
+/// Project one SQuAD-shaped row into the (deduped) memory + question sets.
+fn extract_squad(
+    row: &serde_json::Value,
+    seen: &mut HashSet<String>,
+    memories: &mut Vec<MemItem>,
+    questions: &mut Vec<MemQuestion>,
+) {
+    let context = row.get("context").and_then(|v| v.as_str()).unwrap_or("");
+    let question = row.get("question").and_then(|v| v.as_str()).unwrap_or("");
+    let answer = row
+        .get("answers")
+        .and_then(|a| a.get("text"))
+        .and_then(|t| t.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if context.is_empty() || question.is_empty() || answer.trim().is_empty() {
+        return; // skip unanswerable / malformed rows
+    }
+    if seen.insert(context.to_string()) {
+        memories.push(MemItem {
+            content: context.to_string(),
+            tags: vec!["squad".into(), "context".into()],
+        });
+    }
+    questions.push(MemQuestion {
+        question: question.to_string(),
+        answer_substring: answer.to_string(),
+        category: "reading-comprehension".to_string(),
+    });
+}
+
+/// Project one HotpotQA-shaped row: each context paragraph (title + sentences)
+/// becomes a memory; the (question, answer span) becomes a multi-hop recall
+/// pair. yes/no comparison answers are skipped — they're not retrievable spans.
+fn extract_hotpotqa(
+    row: &serde_json::Value,
+    seen: &mut HashSet<String>,
+    memories: &mut Vec<MemItem>,
+    questions: &mut Vec<MemQuestion>,
+) {
+    let question = row.get("question").and_then(|v| v.as_str()).unwrap_or("");
+    let answer = row.get("answer").and_then(|v| v.as_str()).unwrap_or("");
+    if question.is_empty() || answer.trim().is_empty() {
+        return;
+    }
+    let a_lower = answer.trim().to_ascii_lowercase();
+    if a_lower == "yes" || a_lower == "no" {
+        return; // boolean comparison answer — not a retrievable span
+    }
+
+    if let Some(ctx) = row.get("context") {
+        let titles = ctx.get("title").and_then(|v| v.as_array());
+        let sentences = ctx.get("sentences").and_then(|v| v.as_array());
+        if let (Some(titles), Some(sentences)) = (titles, sentences) {
+            for (i, title) in titles.iter().enumerate() {
+                let title = title.as_str().unwrap_or("");
+                let para = sentences
+                    .get(i)
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|s| s.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .unwrap_or_default();
+                if para.trim().is_empty() {
+                    continue;
+                }
+                let content = if title.is_empty() {
+                    para
+                } else {
+                    format!("{title}: {para}")
+                };
+                if seen.insert(content.clone()) {
+                    memories.push(MemItem {
+                        content,
+                        tags: vec!["hotpotqa".into(), "context".into()],
+                    });
+                }
+            }
+        }
+    }
+
+    questions.push(MemQuestion {
+        question: question.to_string(),
+        answer_substring: answer.to_string(),
+        category: "multi-hop".to_string(),
+    });
 }
 
 /// Minimal percent-encoding for URL query values (dataset names contain `/`).
@@ -271,5 +375,76 @@ mod tests {
     fn missing_cache_returns_none_not_error() {
         let p = cache_dir().join("definitely-does-not-exist-xyz.json");
         assert!(load_cache(&p).unwrap().is_none());
+    }
+
+    #[test]
+    fn hotpotqa_spec_defaults() {
+        let s = FetchSpec::hotpotqa(500);
+        assert_eq!(s.dataset, "hotpotqa/hotpot_qa");
+        assert_eq!(s.config, "distractor");
+        assert_eq!(s.split, "validation");
+        assert_eq!(s.kind, DatasetKind::HotpotQa);
+        // Cache key is still filesystem-safe for the slashed dataset name.
+        assert!(!s.cache_key().contains('/'));
+    }
+
+    #[test]
+    fn extract_squad_from_value_dedups_context() {
+        let mut seen = HashSet::new();
+        let mut mems = Vec::new();
+        let mut qs = Vec::new();
+        let row = serde_json::json!({
+            "context": "Paris is the capital of France.",
+            "question": "What is the capital of France?",
+            "answers": { "text": ["Paris"], "answer_start": [0] }
+        });
+        extract_squad(&row, &mut seen, &mut mems, &mut qs);
+        // Same context, different question — context must not be re-added.
+        let row2 = serde_json::json!({
+            "context": "Paris is the capital of France.",
+            "question": "Which country is Paris the capital of?",
+            "answers": { "text": ["France"], "answer_start": [27] }
+        });
+        extract_squad(&row2, &mut seen, &mut mems, &mut qs);
+        assert_eq!(mems.len(), 1, "context deduped");
+        assert_eq!(qs.len(), 2);
+        assert_eq!(qs[0].answer_substring, "Paris");
+    }
+
+    #[test]
+    fn extract_hotpotqa_builds_paragraph_memories_and_skips_yesno() {
+        let mut seen = HashSet::new();
+        let mut mems = Vec::new();
+        let mut qs = Vec::new();
+
+        // A span-answer row: two context paragraphs become two memories.
+        let row = serde_json::json!({
+            "question": "Which film did Tim Burton direct in 1994?",
+            "answer": "Ed Wood",
+            "context": {
+                "title": ["Ed Wood (film)", "Tim Burton"],
+                "sentences": [
+                    ["Ed Wood is a 1994 American film.", "It was directed by Tim Burton."],
+                    ["Tim Burton is an American filmmaker."]
+                ]
+            }
+        });
+        extract_hotpotqa(&row, &mut seen, &mut mems, &mut qs);
+        assert_eq!(mems.len(), 2, "one memory per context paragraph");
+        assert!(mems[0].content.starts_with("Ed Wood (film): "));
+        assert_eq!(qs.len(), 1);
+        assert_eq!(qs[0].category, "multi-hop");
+        // The gold span appears in a built memory → recall is achievable.
+        assert!(mems.iter().any(|m| m.content.contains("Ed Wood")));
+
+        // A yes/no comparison row contributes no question.
+        let before = qs.len();
+        let yesno = serde_json::json!({
+            "question": "Were both directors American?",
+            "answer": "yes",
+            "context": { "title": ["X"], "sentences": [["irrelevant"]] }
+        });
+        extract_hotpotqa(&yesno, &mut seen, &mut mems, &mut qs);
+        assert_eq!(qs.len(), before, "yes/no answers are skipped");
     }
 }

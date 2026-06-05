@@ -397,25 +397,35 @@ All numbers below are **measured**, not projected — produced by `mneme-bench`
 on a 2021 M1-class laptop (8 cores, 16 GB), release build. Reproduce with the
 commands shown.
 
-### Real public benchmark — SQuAD v1.1 (recall@10)
+### Real public benchmarks — SQuAD + HotpotQA (recall@10)
 
 `mneme-bench fetch` downloads a real dataset from the Hugging Face
 datasets-server and runs it through the *actual* ingest → hybrid-retrieve path.
-SQuAD validation: each context becomes a memory (deduplicated), each
-question/answer-span a recall pair.
+**SQuAD** (single-hop reading comprehension): each context → a memory
+(deduplicated), each question/answer-span → a recall pair. **HotpotQA**
+(multi-hop): each of a row's context paragraphs → a memory, the answer span
+must be found across them (yes/no comparison answers are skipped — not
+retrievable spans).
 
 ```bash
 cargo run -p mneme-bench --features fetch --release -- \
-  fetch --dataset squad --rows 2000 --k 10 --embedder fastembed
+  fetch --dataset squad   --rows 2000 --k 10 --embedder fastembed
+cargo run -p mneme-bench --features fetch --release -- \
+  fetch --dataset hotpotqa --rows 1000 --k 10 --embedder fastembed
 ```
 
-| Embedder | Memories | Questions | recall@10 | ms/query |
-|---|---:|---:|---:|---:|
-| `fastembed` (384-d semantic) | 315 | 2,000 | **98.1%** | 9.24 |
-| `mock` (32-d, BM25-only) | 315 | 2,000 | 93.9% | 1.81 |
+| Dataset | Embedder | Memories | Questions | recall@10 | ms/query |
+|---|---|---:|---:|---:|---:|
+| SQuAD v1.1 (single-hop) | `fastembed` (384-d) | 315 | 2,000 | **98.1%** | 9.24 |
+| SQuAD v1.1 (single-hop) | `mock` (32-d, BM25) | 315 | 2,000 | 93.9% | 1.81 |
+| HotpotQA (multi-hop) | `fastembed` (384-d) | 9,227 | 941 | **88.7%** | 17.97 |
+| HotpotQA (multi-hop) | `mock` (32-d, BM25) | 9,227 | 941 | 83.4% | 8.61 |
 
-Real semantic embeddings lift recall +4.2 points over keyword-only on the same
-real questions — the hybrid path earning its keep on non-synthetic data.
+Real semantic embeddings lift recall over keyword-only on the same real
+questions — **+4.2 pts on single-hop SQuAD, +5.3 pts on the harder multi-hop
+HotpotQA** — the hybrid path earning its keep on non-synthetic data. The
+HotpotQA run is also a real-corpus scale check: 9k+ memories, 941 multi-hop
+questions, sub-18 ms/query.
 
 ### Scale & load — synthetic corpus up to 105k memories
 
@@ -447,6 +457,16 @@ Index build is HNSW-bound and degrades gracefully (per-insert p50 0.13 ms →
 needle set through 105k memories, confirming retrieval correctness holds at
 scale. (The synthetic generator is deterministic — same `--seed` reproduces
 the identical corpus.)
+
+**With a real semantic embedder** (`--embedder fastembed`, 384-d) at 5,251
+memories: append still **182,519/s, p50 0.00 ms** (embedding is computed in a
+separate pre-phase, off the write path — Hard Rule #5), index 1,345/s, query
+p50 9.84 ms (per-query embedding dominates), recall@10 99.2%. The write path
+stays fast whether the embedder is mock or a real model.
+
+These recall floors are enforced in CI — the `bench-gate` job fails the build
+if LOCOMO/LongMemEval mini-suite recall or synthetic-scale recall drops below
+its floor (eval-as-product, the moat made into a regression gate).
 
 ---
 
@@ -551,7 +571,7 @@ mneme-kv          :  10 tests
 mneme-exchange    :  11 tests
 mneme-dream       :  10 tests
 mneme-provenance  :   7 tests
-mneme-bench       :  24 tests (+4 under --features fetch: real-data loader)
+mneme-bench       :  24 tests (+7 under --features fetch: SQuAD + HotpotQA loaders)
 mneme-mcp         :  26 tests (unit + integration)
 mneme-py          :   7 tests (Rust-side inner-client coverage)
 mneme-server      :  27 tests
@@ -562,7 +582,7 @@ mneme-privacy     :  19 tests
 sdk/node (TS)     :   8 tests (offline, stub fetch)
 ──────────────────────────────
 TOTAL             : 461 Rust tests (458 on --no-default-features) + 8 SDK tests · all passing
-                    (+4 more with --features fetch on mneme-bench)
+                    (+7 more with --features fetch on mneme-bench)
 ```
 
 ---

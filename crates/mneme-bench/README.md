@@ -77,9 +77,14 @@ with a methodology note: recall@k (retrieval-quality proxy) and QA accuracy are
 
 ### `fetch` — real public benchmark *(feature `fetch`)*
 Downloads a real dataset from the Hugging Face datasets-server, projects it into
-a recall suite (SQuAD: each context → a memory, deduplicated; each
-question/answer-span → a recall pair), caches it to disk, and runs `memeval`
-over it. Subsequent runs are offline from the cache. `--force` re-downloads;
+a recall suite, caches it to disk, and runs `memeval` over it. Two datasets:
+- `--dataset squad` (single-hop): each context → a memory (deduplicated), each
+  question/answer-span → a recall pair.
+- `--dataset hotpotqa` (multi-hop): each of a row's context paragraphs → a
+  memory; the answer span must be found across them. yes/no comparison answers
+  are skipped (not retrievable spans).
+
+Subsequent runs are offline from the cache. `--force` re-downloads;
 `--fetch-only` caches without evaluating.
 
 The `fetch` feature is the *only* thing that pulls a network dependency
@@ -110,15 +115,17 @@ of any size — a needle either was retrieved or it wasn't, with no fuzzy match.
 All numbers below are **measured**, not projected — `mneme-bench` on a 2021
 M1-class laptop (8 cores, 16 GB), release build.
 
-### Real benchmark — SQuAD v1.1, recall@10
+### Real benchmarks — SQuAD + HotpotQA, recall@10
 
-| Embedder | Memories | Questions | recall@10 | ms/query |
-|---|---:|---:|---:|---:|
-| `fastembed` (384-d semantic) | 315 | 2,000 | **98.1%** | 9.24 |
-| `mock` (32-d, BM25-only) | 315 | 2,000 | 93.9% | 1.81 |
+| Dataset | Embedder | Memories | Questions | recall@10 | ms/query |
+|---|---|---:|---:|---:|---:|
+| SQuAD v1.1 (single-hop) | `fastembed` | 315 | 2,000 | **98.1%** | 9.24 |
+| SQuAD v1.1 (single-hop) | `mock` | 315 | 2,000 | 93.9% | 1.81 |
+| HotpotQA (multi-hop) | `fastembed` | 9,227 | 941 | **88.7%** | 17.97 |
+| HotpotQA (multi-hop) | `mock` | 9,227 | 941 | 83.4% | 8.61 |
 
-Real semantic embeddings lift recall +4.2 points over keyword-only on the same
-real questions.
+Real semantic embeddings lift recall +4.2 pts on single-hop SQuAD and +5.3 pts
+on the harder multi-hop HotpotQA over keyword-only.
 
 ### Scale sweep — synthetic corpus, mock embedder
 
@@ -140,13 +147,13 @@ exact-gold needle set through 105k memories.
 ## Tests
 
 ```bash
-cargo test -p mneme-bench                  # 21 tests (offline, no network)
-cargo test -p mneme-bench --features fetch # 25 tests (+4 real-data loader)
+cargo test -p mneme-bench                  # 24 tests (offline, no network)
+cargo test -p mneme-bench --features fetch # 31 tests (+7 real-data loaders)
 ```
 
-The fetch-feature tests cover the loader's pure parts (cache-key safety,
-URL-encoding, spec defaults, missing-cache handling) without hitting the
-network.
+The fetch-feature tests cover the loaders' pure parts (cache-key safety,
+URL-encoding, spec defaults, missing-cache handling, and SQuAD/HotpotQA row
+projection) without hitting the network.
 
 ---
 

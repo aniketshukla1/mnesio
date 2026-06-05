@@ -103,7 +103,8 @@ async fn cmd_fetch(opts: FetchOpts) -> Result<()> {
 
     let spec = match opts.dataset.as_str() {
         "squad" => FetchSpec::squad(opts.rows),
-        other => bail!("unknown --dataset {other:?}; supported: squad"),
+        "hotpotqa" | "hotpot" => FetchSpec::hotpotqa(opts.rows),
+        other => bail!("unknown --dataset {other:?}; supported: squad, hotpotqa"),
     };
     let suite = fetch_suite(&spec, opts.force).await?;
     eprintln!(
@@ -185,6 +186,26 @@ async fn cmd_scale(opts: ScaleOpts) -> Result<()> {
             r.query_p99_ms,
             r.recall() * 100.0,
         );
+    }
+
+    // CI gate: every swept size must clear the recall floor.
+    if let Some(min_recall) = opts.min_recall {
+        if let Some(worst) = reports.iter().min_by(|a, b| {
+            a.recall()
+                .partial_cmp(&b.recall())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }) {
+            if worst.recall() < min_recall {
+                eprintln!(
+                    "# REGRESSION: recall@{} {:.1}% (at N={}) below floor {:.1}%. Exit 1.",
+                    worst.k,
+                    worst.recall() * 100.0,
+                    worst.ingested,
+                    min_recall * 100.0
+                );
+                std::process::exit(1);
+            }
+        }
     }
     Ok(())
 }
@@ -744,6 +765,8 @@ struct ScaleOpts {
     embedder: String,
     seed: u64,
     out_path: Option<std::path::PathBuf>,
+    /// CI gate: exit 1 if any size's recall@k falls below this floor (0..1).
+    min_recall: Option<f32>,
 }
 
 struct MemEvalOpts {
@@ -900,9 +923,13 @@ fn parse_scale(mut iter: std::iter::Peekable<impl Iterator<Item = String>>) -> R
         embedder: "mock".into(),
         seed: 42,
         out_path: None,
+        min_recall: None,
     };
     while let Some(arg) = iter.next() {
         match arg.as_str() {
+            "--min-recall" => {
+                opts.min_recall = Some(next_value(&mut iter, "--min-recall")?.parse()?)
+            }
             "--sizes" => {
                 let raw = next_value(&mut iter, "--sizes")?;
                 let mut sizes = Vec::new();
@@ -1090,11 +1117,11 @@ fn print_help() {
          \x20\x20             over a deterministic synthetic corpus (1k–100k+)\n\
          \x20\x20compete    competitive comparison: mneme's measured recall + capability\n\
          \x20\x20             matrix + cited competitor QA scores (Mem0/Zep papers)\n\
-         \x20\x20fetch      download a REAL public benchmark (SQuAD) + run recall@k\n\
+         \x20\x20fetch      download a REAL public benchmark (SQuAD/HotpotQA) + run recall@k\n\
          \x20\x20             (requires building with --features fetch)\n\
          \n\
          FETCH OPTIONS (--features fetch):\n\
-         \x20\x20--dataset        squad                           (default: squad)\n\
+         \x20\x20--dataset        squad | hotpotqa                (default: squad)\n\
          \x20\x20--rows           rows to pull (paginated)        (default: 2000)\n\
          \x20\x20--k              top-k for recall                (default: 10)\n\
          \x20\x20--embedder       mock | fastembed                (default: fastembed)\n\
@@ -1107,6 +1134,7 @@ fn print_help() {
          \x20\x20--embedder       mock | fastembed                (default: mock)\n\
          \x20\x20--seed           generator seed                  (default: 42)\n\
          \x20\x20--out PATH       CSV output file                 (default: stdout)\n\
+         \x20\x20--min-recall N   exit 1 if any size's recall@k < N (CI gate)\n\
          \n\
          MEMEVAL OPTIONS:\n\
          \x20\x20--suite          locomo | longmemeval             (default: locomo)\n\

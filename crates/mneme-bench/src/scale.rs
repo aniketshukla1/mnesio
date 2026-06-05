@@ -133,15 +133,14 @@ pub async fn run_scale_point(
     let mut append_latencies_ms: Vec<f64> = Vec::with_capacity(corpus.memories.len());
     let mut index_latencies_ms: Vec<f64> = Vec::with_capacity(corpus.memories.len());
 
-    // Phase 1 — APPEND: write every memory to the log. This is mneme's real
-    // user-facing write path (Hard Rule #5: <5ms target). Embedding runs in
-    // batches first so the model call isn't charged to the append timing — the
-    // server's embedding worker does this off the write path too. We retain the
-    // resulting LogEntries to drive the index phase next.
     let mems = &corpus.memories;
-    let mut entries: Vec<LogEntry> = Vec::with_capacity(mems.len());
 
-    let append_start = Instant::now();
+    // Phase 0 — EMBED: compute every embedding up front, in batches. In the
+    // server this runs in the async embedding worker, *off* the write path
+    // (Hard Rule #5); we deliberately keep it out of the append window below so
+    // the append throughput reflects the real <5ms write path even under a slow
+    // real (fastembed) embedder, not the embedding cost.
+    let mut embeddings: Vec<Option<Vec<f32>>> = Vec::with_capacity(mems.len());
     let mut idx = 0;
     while idx < mems.len() {
         let end = (idx + EMBED_BATCH).min(mems.len());
@@ -150,44 +149,53 @@ pub async fn run_scale_point(
             .embed(&batch_texts)
             .await
             .map_err(|e| anyhow!("embed: {e}"))?;
-        for (offset, gm) in mems[idx..end].iter().enumerate() {
-            let embedding = vectors.get(offset).cloned();
-            let mem = Memory {
-                id: new_id(),
-                scope: scope.clone(),
-                content: gm.content.clone(),
-                keywords: vec![],
-                tags: gm.tags.clone(),
-                context: String::new(),
-                embedding,
-                links: vec![],
-                parent: None,
-                evolution_count: 0,
-                time: BiTemporal::now(),
-                provenance: Provenance {
-                    source: "scale".into(),
-                    trust: 1.0,
-                },
-                source: None,
-                position: None,
-            };
-            let mref = MemoryRef(mem.id);
-            if gm.needle_for.is_some() {
-                content_by_id.insert(mref, mem.content.clone());
-            }
-            let event = Event::MemoryWritten(mem);
-
-            // Time the append-only critical path (the <5ms write path).
-            let w = Instant::now();
-            let id = log
-                .append(event.clone())
-                .await
-                .map_err(|e| anyhow!("append: {e}"))?;
-            append_latencies_ms.push(w.elapsed().as_secs_f64() * 1000.0);
-
-            entries.push(LogEntry { id, event });
+        for offset in 0..(end - idx) {
+            embeddings.push(vectors.get(offset).cloned());
         }
         idx = end;
+    }
+
+    // Phase 1 — APPEND: write every memory to the log. This is mneme's real
+    // user-facing write path (Hard Rule #5: <5ms target). Embeddings are
+    // precomputed above, so this window is pure log-append. We retain the
+    // resulting LogEntries to drive the index phase next.
+    let mut entries: Vec<LogEntry> = Vec::with_capacity(mems.len());
+    let append_start = Instant::now();
+    for (gm, embedding) in mems.iter().zip(embeddings) {
+        let mem = Memory {
+            id: new_id(),
+            scope: scope.clone(),
+            content: gm.content.clone(),
+            keywords: vec![],
+            tags: gm.tags.clone(),
+            context: String::new(),
+            embedding,
+            links: vec![],
+            parent: None,
+            evolution_count: 0,
+            time: BiTemporal::now(),
+            provenance: Provenance {
+                source: "scale".into(),
+                trust: 1.0,
+            },
+            source: None,
+            position: None,
+        };
+        let mref = MemoryRef(mem.id);
+        if gm.needle_for.is_some() {
+            content_by_id.insert(mref, mem.content.clone());
+        }
+        let event = Event::MemoryWritten(mem);
+
+        // Time the append-only critical path (the <5ms write path).
+        let w = Instant::now();
+        let id = log
+            .append(event.clone())
+            .await
+            .map_err(|e| anyhow!("append: {e}"))?;
+        append_latencies_ms.push(w.elapsed().as_secs_f64() * 1000.0);
+
+        entries.push(LogEntry { id, event });
     }
     let append_secs = append_start.elapsed().as_secs_f64();
 
