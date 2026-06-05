@@ -598,7 +598,7 @@ mneme-procedural  : 112 tests
 mneme-causal      :  15 tests
 mneme-probe       :  14 tests
 mneme-kv          :  10 tests
-mneme-exchange    :  11 tests
+mneme-exchange    :  11 tests (+4 under --features ed25519: real signatures)
 mneme-dream       :  10 tests
 mneme-provenance  :   8 tests
 mneme-bench       :  25 tests (+7 under --features fetch: SQuAD + HotpotQA loaders)
@@ -608,11 +608,11 @@ mneme-server      :  27 tests
 mneme-store       :   1 test
 mneme-graph       :  27 tests
 mneme-extract     :  33 tests
-mneme-privacy     :  22 tests
+mneme-privacy     :  22 tests (+4 under --features aead: real ChaCha20-Poly1305)
 sdk/node (TS)     :   8 tests (offline, stub fetch)
 ──────────────────────────────
 TOTAL             : 479 Rust tests (476 on --no-default-features) + 8 SDK tests · all passing
-                    (+7 more with --features fetch on mneme-bench)
+                    (+7 with --features fetch on mneme-bench, +4 aead, +4 ed25519)
 ```
 
 ---

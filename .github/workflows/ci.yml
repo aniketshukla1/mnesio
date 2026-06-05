@@ -71,6 +71,14 @@ jobs:
       # download is never triggered in CI. If a future test needs the
       # real embedder, gate it with `#[ignore]` so this matrix stays fast.
       - run: cargo test --workspace ${{ matrix.config.flags }}
+      # Real-crypto seams are feature-gated (kept out of the default dep tree).
+      # They're offline + fast, so exercise them here so the production swap-ins
+      # stay green. Only on the default-features leg to avoid redundant runs.
+      - name: real-crypto features (aead + ed25519)
+        if: matrix.config.name == 'default features'
+        run: |
+          cargo test -p mneme-privacy --features aead
+          cargo test -p mneme-exchange --features ed25519
 
   bench-gate:
     name: bench gate (recall floors)

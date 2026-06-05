@@ -34,16 +34,23 @@
 //!   [`FakeSigner`] / [`FakeCanaryRunner`] keep tests hermetic. A real build
 //!   wires ed25519 + the procedural executor.
 //!
-//! ## Known limitation (don't pretend it's solved)
+//! ## Signers: fake default, real ed25519 behind a feature
 //!
-//! [`FakeSigner`] is a dependency-free keyed digest (FNV/SplitMix-style), not
-//! a real asymmetric signature — enough to prove tamper-rejection + the
-//! verify-before-activate flow under test. Production swaps in ed25519 behind
-//! the same [`Signer`] trait; `TODO(phase-13)`.
+//! [`FakeSigner`] (the default) is a dependency-free keyed digest
+//! (FNV/SplitMix-style), not a real asymmetric signature — enough to prove
+//! tamper-rejection + the verify-before-activate flow under test, with no
+//! crypto dependency. The real signer, [`Ed25519Signer`] (RustCrypto
+//! `ed25519-dalek`), is a drop-in behind the same [`Signer`] trait, enabled
+//! with the `ed25519` feature (`--features ed25519`): it signs with a private
+//! key and verifies against an issuer's *public* key from a trust registry
+//! (unknown issuer → fail closed). The export / verify-before-activate
+//! protocol is identical either way.
 
 mod certificate;
 mod import;
 
+#[cfg(feature = "ed25519")]
+pub use certificate::Ed25519Signer;
 pub use certificate::{
     export, ExportError, FakeSigner, SignatureError, SignedBytes, Signer, SkillCertificate,
 };
