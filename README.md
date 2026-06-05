@@ -75,7 +75,7 @@ Twelve crates, each with a focused responsibility. External dependencies sit beh
 | `mneme-procedural` | GEPA-style procedural compiler + gate + eval suite + learning curve | ✅ Phase 2 |
 | `mneme-causal` | Counterfactual contribution scoring + GC by measurement (leave-one-out ablation over the replayable log) | ✅ Phase 10 |
 | `mneme-probe` | Self-falsifying memory — acceptance probes + belief calibration; a refuted claim invalidates-and-supersedes itself (history kept) | ✅ Phase 11 |
-| `mneme-kv` | Gated KV cartridges — KV cache as a versioned, gated, erasable view of the log (tensor backend simulated; reconciliations real) | ◑ Phase 12 |
+| `mneme-kv` | Gated KV cartridges — KV cache as a versioned, gated, erasable view of the log (real-tensor attention backend + reconciliations; pretrained weights remaining) | ◑ Phase 12 |
 | `mneme-exchange` | Certified skill exchange — export a gated artifact as a signed certificate; the importer re-runs its own gate before activation | ✅ Phase 13 |
 | `mneme-dream` | Negative memory + dreaming — gated suppression rules from bad outcomes; bounded offline prune-by-contribution + re-anchor drifted notes | ✅ Phase 14 |
 | `mneme-provenance` | Regulator-grade provenance — time-travel reconstruction + provenance chains + verifiable erasure over the append-only log | ✅ Phase 15 |
@@ -578,7 +578,7 @@ differentiation is the capability matrix, not a single leaderboard cell.
 
 - **Phase 10** ✅ Causal memory — counterfactual contribution scoring + GC by measurement (`mneme-causal`)
 - **Phase 11** ✅ Self-falsifying memory — acceptance probes + belief calibration; a refuted claim auto-supersedes (`mneme-probe`)
-- **Phase 12** ◑ Gated KV cartridges — KV cache as a versioned, gated, erasable view of the log; substrate done, real tensor backend behind the `KvBackend` trait remaining (`mneme-kv`)
+- **Phase 12** ◑ Gated KV cartridges — KV cache as a versioned, gated, erasable view of the log; substrate **and a real-tensor attention backend** (`TensorKvBackend`: real K/V tensors + multi-head attention) done — loading pretrained open-weights behind the same `KvBackend` seam is the one remaining lift (`mneme-kv`)
 - **Phase 13** ✅ Certified skill exchange — signed certificate; importer re-runs its own gate before activation (`mneme-exchange`)
 - **Phase 14** ✅ Negative memory + dreaming — gated suppression rules + bounded offline prune-by-contribution & re-anchor (`mneme-dream`)
 - **Phase 15** ✅ Regulator-grade provenance — time-travel reconstruction + provenance chains + verifiable erasure (`mneme-provenance`)
@@ -597,7 +597,7 @@ mneme-evolve      :  27 tests
 mneme-procedural  : 112 tests
 mneme-causal      :  18 tests
 mneme-probe       :  14 tests
-mneme-kv          :  10 tests
+mneme-kv          :  15 tests
 mneme-exchange    :  11 tests (+4 under --features ed25519: real signatures)
 mneme-dream       :  10 tests
 mneme-provenance  :   8 tests
@@ -611,7 +611,7 @@ mneme-extract     :  33 tests
 mneme-privacy     :  22 tests (+4 under --features aead: real ChaCha20-Poly1305)
 sdk/node (TS)     :   8 tests (offline, stub fetch)
 ──────────────────────────────
-TOTAL             : 482 Rust tests (479 on --no-default-features) + 8 SDK tests · all passing
+TOTAL             : 489 Rust tests (486 on --no-default-features) + 8 SDK tests · all passing
                     (+7 with --features fetch on mneme-bench, +4 aead, +4 ed25519)
 ```
 

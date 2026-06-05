@@ -28,13 +28,24 @@
 //!
 //! The *substrate* is real and tested: the view semantics, the gate, the
 //! versioning, and the erasure reconciliation. The **tensor backend is a seam**
-//! ([`KvBackend`], Hard Rule #7). [`FakeKvBackend`] is deterministic and
-//! dependency-free — it models a KV blob as the bag of (sealed-then-opened)
-//! memory texts and answers by lookup with a low simulated latency, which is
-//! enough to exercise every reconciliation. A real backend over an
-//! open-weights model's KV cache is `TODO(phase-12)` behind the same trait —
-//! see the crate README. We do not claim the tensor half is done; we claim the
-//! reconciliations that make KV memory *shippable* are proven.
+//! ([`KvBackend`], Hard Rule #7). Two implementations ship:
+//! - [`FakeKvBackend`] — deterministic, models the blob as the bag of
+//!   (sealed-then-opened) texts and answers by lookup; fastest for exercising
+//!   every reconciliation in tests.
+//! - [`TensorKvBackend`] — a **real-tensor** backend: `compile_blob` runs each
+//!   memory through token-embedding + linear K/V projections and stores the
+//!   resulting **K/V tensors** (`f32`, `[members][seq][d_model]`) as the blob;
+//!   `answer` retrieves by **multi-head scaled dot-product attention** over
+//!   that cache. The blob is real KV-cache bytes whose size tracks token count,
+//!   so erasure genuinely shrinks it. Still dependency-free and pure Rust.
+//!
+//! What's *not* yet done is the **pretrained weights**: `TensorKvBackend` uses
+//! content-derived embeddings + fixed seeded projections (retrieval tracks
+//! token overlap, not trained semantics; Q shares K's projection). Loading a
+//! real open-weights model's embedding + Wq/Wk/Wv behind this same
+//! `compile_blob`/`answer` path is the one remaining lift — a weights load, not
+//! an architecture change. We claim the reconciliations that make KV memory
+//! *shippable* are proven, and the tensor math is now real.
 //!
 //! ## Hard-rule posture
 //!
@@ -49,9 +60,11 @@
 
 mod cartridge;
 mod store;
+mod tensor;
 
 pub use cartridge::{
     compile, Cartridge, CartridgeKey, CartridgeStatus, CompileError, FakeKvBackend, KvAnswer,
     KvBackend, SealedMemory,
 };
 pub use store::{ActivateError, CartridgeStore};
+pub use tensor::{TensorConfig, TensorKvBackend};
