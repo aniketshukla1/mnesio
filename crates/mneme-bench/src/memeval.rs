@@ -28,7 +28,7 @@ use mneme_core::types::{new_id, BiTemporal, MemoryRef, Scope};
 use mneme_core::{Embedder, EventLog, Query, Retriever};
 use mneme_index::{Bm25View, FastEmbedEmbedder, HybridRetriever, MockEmbedder, VectorView};
 use mneme_store::FjallEventLog;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -38,7 +38,7 @@ use std::time::Instant;
 const MOCK_DIM: usize = 32;
 
 /// A memory-recall suite, mirrored from the JSON files in `data/`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct MemEvalSuite {
     pub name: String,
     pub description: String,
@@ -47,14 +47,14 @@ pub struct MemEvalSuite {
     pub questions: Vec<MemQuestion>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct MemItem {
     pub content: String,
     #[serde(default)]
     pub tags: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct MemQuestion {
     pub question: String,
     /// Case-insensitive substring that must appear in a retrieved

@@ -15,3 +15,6 @@ sdk/node/node_modules/
 sdk/node/dist/
 sdk/node/package-lock.json
 sdk/node/.last_build_hash
+
+# Downloaded benchmark cache (mneme-bench fetch)
+crates/mneme-bench/data/cache/

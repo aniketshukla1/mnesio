@@ -33,6 +33,8 @@ use mneme_procedural::{
 // pulling `mneme-procedural` directly.
 pub use mneme_procedural::PolicyExecutor;
 
+#[cfg(feature = "fetch")]
+pub mod fetch;
 pub mod gen;
 pub mod memeval;
 pub mod report;

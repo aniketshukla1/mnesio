@@ -56,7 +56,42 @@ async fn main() -> Result<()> {
         Command::Compare(opts) => cmd_compare(opts).await,
         Command::MemEval(opts) => cmd_memeval(opts).await,
         Command::Scale(opts) => cmd_scale(opts).await,
+        #[cfg(feature = "fetch")]
+        Command::Fetch(opts) => cmd_fetch(opts).await,
     }
+}
+
+// ---------------- fetch (real public benchmark) ----------------
+
+#[cfg(feature = "fetch")]
+async fn cmd_fetch(opts: FetchOpts) -> Result<()> {
+    use mneme_bench::fetch::{fetch_suite, FetchSpec};
+
+    let spec = match opts.dataset.as_str() {
+        "squad" => FetchSpec::squad(opts.rows),
+        other => bail!("unknown --dataset {other:?}; supported: squad"),
+    };
+    let suite = fetch_suite(&spec, opts.force).await?;
+    eprintln!(
+        "# fetch: {} — {} memories, {} questions",
+        suite.name,
+        suite.memories.len(),
+        suite.questions.len()
+    );
+    if opts.fetch_only {
+        eprintln!("# fetch-only: suite cached, skipping eval");
+        return Ok(());
+    }
+
+    eprintln!(
+        "# running recall@{} over the real corpus (embedder={})…",
+        opts.k, opts.embedder
+    );
+    let report = run_memeval(&suite, opts.k, &opts.embedder).await?;
+    let out = format_memeval_markdown(&report);
+    println!("{out}");
+    write_memeval_summary_to_stderr(&report);
+    Ok(())
 }
 
 // ---------------- scale / load ----------------
@@ -646,6 +681,18 @@ enum Command {
     Compare(CompareOpts),
     MemEval(MemEvalOpts),
     Scale(ScaleOpts),
+    #[cfg(feature = "fetch")]
+    Fetch(FetchOpts),
+}
+
+#[cfg(feature = "fetch")]
+struct FetchOpts {
+    dataset: String,
+    rows: usize,
+    k: usize,
+    embedder: String,
+    force: bool,
+    fetch_only: bool,
 }
 
 struct ScaleOpts {
@@ -726,6 +773,10 @@ fn parse_args() -> Result<RootArgs> {
             iter.next();
             "scale"
         }
+        Some("fetch") => {
+            iter.next();
+            "fetch"
+        }
         Some("--help") | Some("-h") => {
             print_help();
             std::process::exit(0);
@@ -748,8 +799,49 @@ fn parse_args() -> Result<RootArgs> {
         "scale" => Ok(RootArgs {
             command: Command::Scale(parse_scale(iter)?),
         }),
+        "fetch" => {
+            #[cfg(feature = "fetch")]
+            {
+                Ok(RootArgs {
+                    command: Command::Fetch(parse_fetch(iter)?),
+                })
+            }
+            #[cfg(not(feature = "fetch"))]
+            {
+                let _ = iter;
+                bail!("the `fetch` subcommand requires building with --features fetch");
+            }
+        }
         _ => unreachable!(),
     }
+}
+
+#[cfg(feature = "fetch")]
+fn parse_fetch(mut iter: std::iter::Peekable<impl Iterator<Item = String>>) -> Result<FetchOpts> {
+    let mut opts = FetchOpts {
+        dataset: "squad".into(),
+        rows: 2000,
+        k: 10,
+        embedder: "fastembed".into(),
+        force: false,
+        fetch_only: false,
+    };
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--dataset" => opts.dataset = next_value(&mut iter, "--dataset")?,
+            "--rows" => opts.rows = next_value(&mut iter, "--rows")?.parse()?,
+            "--k" => opts.k = next_value(&mut iter, "--k")?.parse()?,
+            "--embedder" => opts.embedder = next_value(&mut iter, "--embedder")?,
+            "--force" => opts.force = true,
+            "--fetch-only" => opts.fetch_only = true,
+            "--help" | "-h" => {
+                print_help();
+                std::process::exit(0);
+            }
+            other => bail!("unknown argument {other:?}; pass --help for usage"),
+        }
+    }
+    Ok(opts)
 }
 
 fn parse_scale(mut iter: std::iter::Peekable<impl Iterator<Item = String>>) -> Result<ScaleOpts> {
@@ -924,6 +1016,16 @@ fn print_help() {
          \x20\x20memeval    memory recall@k over the real ingest→retrieve path\n\
          \x20\x20scale      large-scale load test: throughput + latency percentiles + recall\n\
          \x20\x20             over a deterministic synthetic corpus (1k–100k+)\n\
+         \x20\x20fetch      download a REAL public benchmark (SQuAD) + run recall@k\n\
+         \x20\x20             (requires building with --features fetch)\n\
+         \n\
+         FETCH OPTIONS (--features fetch):\n\
+         \x20\x20--dataset        squad                           (default: squad)\n\
+         \x20\x20--rows           rows to pull (paginated)        (default: 2000)\n\
+         \x20\x20--k              top-k for recall                (default: 10)\n\
+         \x20\x20--embedder       mock | fastembed                (default: fastembed)\n\
+         \x20\x20--force          re-download, ignore the cache\n\
+         \x20\x20--fetch-only     download + cache, skip the eval\n\
          \n\
          SCALE OPTIONS:\n\
          \x20\x20--sizes          comma-separated corpus sizes    (default: 1000,5000,10000)\n\

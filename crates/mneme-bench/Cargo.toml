@@ -22,6 +22,7 @@ anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
+reqwest = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -29,3 +30,7 @@ default = []
 # LLM and the executor LLM. Off by default — the demo path uses a
 # content-derived stub so the benchmark runs offline.
 ollama = ["mneme-llm/ollama"]
+# Enable to download a real public benchmark (e.g. rajpurkar/squad) from the
+# Hugging Face datasets-server into a MemEvalSuite. Pulls in reqwest; off by
+# default so the core build + CI stay offline + network-free.
+fetch = ["dep:reqwest"]
