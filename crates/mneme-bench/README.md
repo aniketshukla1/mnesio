@@ -75,6 +75,14 @@ Mem0 (arXiv:2504.19413) and Zep (arXiv:2501.13956) papers. The report leads
 with a methodology note: recall@k (retrieval-quality proxy) and QA accuracy are
 *different metrics* and are never presented as one ranking.
 
+### `edge` — adversarial / edge-case stress
+Drives the real ingest→retrieve→replay path with hostile inputs (degenerate /
+syntax-laden / unicode queries, huge & empty content, scope-isolation extremes,
+supersede-keeps-history, tombstone-heavy indexes, dim mismatch, replay
+determinism, concurrent writes) and asserts the seven hard-rule invariants.
+Exits non-zero on any violation (CI gate). This suite found and fixed a real
+BM25 bug where adversarial queries 500'd instead of returning empty.
+
 ### `fetch` — real public benchmark *(feature `fetch`)*
 Downloads a real dataset from the Hugging Face datasets-server, projects it into
 a recall suite, caches it to disk, and runs `memeval` over it. Two datasets:

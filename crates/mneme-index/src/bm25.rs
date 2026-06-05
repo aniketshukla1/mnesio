@@ -303,28 +303,35 @@ impl Bm25View {
         let searcher = self.reader.searcher();
 
         // Tier 1: strict AND.
-        let q = self.build_query(&sanitized, scope, false, true)?;
-        let hits = self.run_search(&searcher, &*q, k)?;
-        if !hits.is_empty() {
-            return Ok((hits, Bm25Tier::StrictAnd));
+        if let Some(q) = self.build_query(&sanitized, scope, false, true)? {
+            let hits = self.run_search(&searcher, &*q, k)?;
+            if !hits.is_empty() {
+                return Ok((hits, Bm25Tier::StrictAnd));
+            }
         }
 
         // Tier 2: fuzzy AND. Catches all-misspelled multi-word queries
         // where intent is "all of these (give or take a typo)".
-        let q = self.build_query(&sanitized, scope, true, true)?;
-        let hits = self.run_search(&searcher, &*q, k)?;
-        if !hits.is_empty() {
-            return Ok((hits, Bm25Tier::FuzzyAnd));
+        if let Some(q) = self.build_query(&sanitized, scope, true, true)? {
+            let hits = self.run_search(&searcher, &*q, k)?;
+            if !hits.is_empty() {
+                return Ok((hits, Bm25Tier::FuzzyAnd));
+            }
         }
 
         // Tier 3: merge strict OR ∪ fuzzy OR. Each query gets its own
         // BM25 scores; we dedupe by memory and keep the higher score (so
         // exact-match wins over fuzzy-match for the same memory) before
-        // re-sorting and truncating.
-        let strict_or = self.build_query(&sanitized, scope, false, false)?;
-        let fuzzy_or = self.build_query(&sanitized, scope, true, false)?;
-        let strict_hits = self.run_search(&searcher, &*strict_or, k)?;
-        let fuzzy_hits = self.run_search(&searcher, &*fuzzy_or, k)?;
+        // re-sorting and truncating. A tier whose text can't be parsed into a
+        // positive query contributes no hits (see `build_query`).
+        let strict_hits = match self.build_query(&sanitized, scope, false, false)? {
+            Some(q) => self.run_search(&searcher, &*q, k)?,
+            None => Vec::new(),
+        };
+        let fuzzy_hits = match self.build_query(&sanitized, scope, true, false)? {
+            Some(q) => self.run_search(&searcher, &*q, k)?,
+            None => Vec::new(),
+        };
         let merged = merge_by_memory(strict_hits, fuzzy_hits, k);
         let tier = if merged.is_empty() {
             Bm25Tier::Empty
@@ -336,13 +343,20 @@ impl Bm25View {
 
     /// Build the combined `BooleanQuery` for one tier of the fallback. The
     /// `fuzzy` and `conjunction` flags pick which tier this is.
+    ///
+    /// Returns `Ok(None)` when the sanitized text can't be turned into a
+    /// *positive* query (all-stopword input, bare/​trailing boolean operators,
+    /// or other syntax the operator-parser rejects). That's user free-text the
+    /// parser can't use — not a system fault — so the caller falls through to
+    /// the next tier and ultimately to empty results, never an error. Genuine
+    /// index errors still propagate as `Err`.
     fn build_query(
         &self,
         sanitized: &str,
         scope: &Scope,
         fuzzy: bool,
         conjunction: bool,
-    ) -> Result<Box<dyn Query>, MnemeError> {
+    ) -> Result<Option<Box<dyn Query>>, MnemeError> {
         let mut parser =
             QueryParser::for_index(&self.index, vec![self.fields.content, self.fields.tags]);
         if conjunction {
@@ -359,9 +373,13 @@ impl Bm25View {
             parser.set_field_fuzzy(self.fields.content, false, 1, true);
             parser.set_field_fuzzy(self.fields.tags, false, 1, true);
         }
-        let text_query = parser
-            .parse_query(sanitized)
-            .map_err(|e| MnemeError::Index(format!("bm25 query parse: {e}")))?;
+        let text_query = match parser.parse_query(sanitized) {
+            Ok(q) => q,
+            // The operator-parser can't turn this free-text into a positive
+            // query (all-stopword, bare "AND OR NOT", trailing operator, …).
+            // No results for this tier — never a 500 on hostile search input.
+            Err(_) => return Ok(None),
+        };
 
         let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::with_capacity(4);
         clauses.push((Occur::Must, text_query));
@@ -390,7 +408,7 @@ impl Bm25View {
                 )),
             ));
         }
-        Ok(Box::new(BooleanQuery::new(clauses)))
+        Ok(Some(Box::new(BooleanQuery::new(clauses))))
     }
 
     fn run_search(
@@ -596,6 +614,38 @@ mod tests {
         assert_eq!(rev.first().map(|h| h.memory), Some(a_ref));
         let log = view.search("logistics", 5, &scope).unwrap();
         assert_eq!(log.first().map(|h| h.memory), Some(b_ref));
+    }
+
+    #[tokio::test]
+    async fn adversarial_queries_return_empty_not_error() {
+        // Free-text the operator-parser can't turn into a positive query must
+        // yield Ok(empty), never an Err (which would 500 a search endpoint).
+        let view = Bm25View::new().unwrap();
+        let scope = Scope::global("test");
+        view.apply(&entry(Event::MemoryWritten(mem_with(
+            "revenue grew strongly",
+            &["fin"],
+            scope.clone(),
+        ))))
+        .await
+        .unwrap();
+
+        for q in [
+            "the of a an is to", // all stopwords → "Only excluding terms given"
+            "a AND OR NOT b",    // bare boolean operators → syntax error
+            "+ - : ",            // operators only
+            "",                  // empty
+            "AND",               // a lone operator keyword
+        ] {
+            let hits = view
+                .search(q, 10, &scope)
+                .unwrap_or_else(|e| panic!("query {q:?} should not error, got: {e}"));
+            assert!(hits.is_empty(), "query {q:?} unexpectedly matched");
+        }
+
+        // A *valid* explicit-operator query still works (feature preserved).
+        let hits = view.search("revenue OR growth", 10, &scope).unwrap();
+        assert!(!hits.is_empty(), "explicit OR query should still match");
     }
 
     #[tokio::test]

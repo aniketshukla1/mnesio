@@ -91,3 +91,5 @@ jobs:
         run: cargo run -p mneme-bench -- memeval --suite longmemeval --k 10 --embedder mock --min-recall 0.8
       - name: scale — synthetic recall floor (2k)
         run: cargo run -p mneme-bench -- scale --sizes 2000 --embedder mock --min-recall 0.95
+      - name: edge — adversarial / hard-rule invariants
+        run: cargo run -p mneme-bench -- edge

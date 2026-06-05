@@ -57,9 +57,34 @@ async fn main() -> Result<()> {
         Command::MemEval(opts) => cmd_memeval(opts).await,
         Command::Scale(opts) => cmd_scale(opts).await,
         Command::Compete(opts) => cmd_compete(opts).await,
+        Command::Edge => cmd_edge().await,
         #[cfg(feature = "fetch")]
         Command::Fetch(opts) => cmd_fetch(opts).await,
     }
+}
+
+// ---------------- edge (adversarial / edge-case stress) ----------------
+
+async fn cmd_edge() -> Result<()> {
+    use mneme_bench::edge::run_edge_suite;
+
+    eprintln!("# mneme-bench edge · adversarial / hard-rule invariant suite");
+    let report = run_edge_suite().await?;
+    for o in &report.outcomes {
+        let mark = if o.passed { "PASS" } else { "FAIL" };
+        eprintln!("#   [{mark}] {:<28} {}", o.name, o.detail);
+    }
+    eprintln!(
+        "# edge summary: {} passed, {} failed (of {})",
+        report.passed(),
+        report.failed(),
+        report.outcomes.len()
+    );
+    if !report.all_passed() {
+        eprintln!("# EDGE FAILURE: an invariant was violated. Exit 1.");
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 // ---------------- compete (competitive comparison) ----------------
@@ -738,6 +763,7 @@ enum Command {
     MemEval(MemEvalOpts),
     Scale(ScaleOpts),
     Compete(CompeteOpts),
+    Edge,
     #[cfg(feature = "fetch")]
     Fetch(FetchOpts),
 }
@@ -842,6 +868,10 @@ fn parse_args() -> Result<RootArgs> {
             iter.next();
             "compete"
         }
+        Some("edge") => {
+            iter.next();
+            "edge"
+        }
         Some("fetch") => {
             iter.next();
             "fetch"
@@ -871,6 +901,21 @@ fn parse_args() -> Result<RootArgs> {
         "compete" => Ok(RootArgs {
             command: Command::Compete(parse_compete(iter)?),
         }),
+        "edge" => {
+            // No options beyond --help; reject stray args for consistency.
+            if let Some(arg) = iter.next() {
+                match arg.as_str() {
+                    "--help" | "-h" => {
+                        print_help();
+                        std::process::exit(0);
+                    }
+                    other => bail!("unknown argument {other:?}; pass --help for usage"),
+                }
+            }
+            Ok(RootArgs {
+                command: Command::Edge,
+            })
+        }
         "fetch" => {
             #[cfg(feature = "fetch")]
             {
@@ -1117,6 +1162,8 @@ fn print_help() {
          \x20\x20             over a deterministic synthetic corpus (1k–100k+)\n\
          \x20\x20compete    competitive comparison: mneme's measured recall + capability\n\
          \x20\x20             matrix + cited competitor QA scores (Mem0/Zep papers)\n\
+         \x20\x20edge       adversarial / edge-case stress: hard-rule invariants under\n\
+         \x20\x20             hostile inputs (exits 1 on any violation — CI gate)\n\
          \x20\x20fetch      download a REAL public benchmark (SQuAD/HotpotQA) + run recall@k\n\
          \x20\x20             (requires building with --features fetch)\n\
          \n\

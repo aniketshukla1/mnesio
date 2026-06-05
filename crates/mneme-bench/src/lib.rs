@@ -34,6 +34,7 @@ use mneme_procedural::{
 pub use mneme_procedural::PolicyExecutor;
 
 pub mod compete;
+pub mod edge;
 #[cfg(feature = "fetch")]
 pub mod fetch;
 pub mod gen;

@@ -468,6 +468,36 @@ These recall floors are enforced in CI — the `bench-gate` job fails the build
 if LOCOMO/LongMemEval mini-suite recall or synthetic-scale recall drops below
 its floor (eval-as-product, the moat made into a regression gate).
 
+### Edge-case / adversarial stress
+
+Throughput stress is only half of "ready". `mneme-bench edge` drives the *real*
+ingest→retrieve→replay path with hostile inputs and asserts the seven hard-rule
+invariants hold — exiting non-zero (and gating CI) on any violation:
+
+```bash
+cargo run -p mneme-bench -- edge
+```
+
+| Scenario | Invariant checked |
+|---|---|
+| degenerate queries | empty / whitespace / stopword-only / `k=0` / `k≫N` never panic or error |
+| pathological syntax | 12 operator/`AND OR NOT`/unicode/emoji queries are sanitized, not 500'd |
+| unicode & emoji content | CJK / accented / emoji memories ingest and stay retrievable |
+| huge & empty content | a ~1 MB memory and an empty one both ingest; gold still retrieved |
+| **scope isolation extreme** | 1 tenant-A needle among 4,000 tenant-B → found, **zero cross-tenant leakage** (Hard Rule #3) |
+| supersede keeps history | a corrected fact leaves retrieval but its original write stays in the log (Hard Rule #2) |
+| tombstone-heavy index | 195/200 invalidated → only the 5 live returned; counts consistent |
+| dim mismatch | a wrong-dimension vector is rejected with an error, not a panic |
+| **replay rebuild** | fresh views replayed from the log reproduce identical BM25 + recall (Hard Rule #4) |
+| concurrent writes | 256 concurrent appends all land with unique, monotonic ids (Hard Rule #2/#4) |
+
+This suite **found and fixed a real bug**: an all-stopword query (`"the of a"`)
+or one with bare boolean operators (`"a AND OR NOT b"`) used to surface a hard
+tantivy parse error — i.e. a 500 on adversarial search input. The BM25 query
+path now treats unparseable free-text as "no results for this tier" (graceful
+empty), while still honoring valid explicit-operator queries like
+`revenue OR growth`.
+
 ---
 
 ## ⚖️ How mneme compares
@@ -562,7 +592,7 @@ The frontier layer (10–15) is what a storage-shaped competitor (Mem0, Zep, Let
 ```
 mneme-core        :   3 tests
 mneme-llm         :  11 tests
-mneme-index       :  82 tests
+mneme-index       :  83 tests
 mneme-evolve      :  27 tests
 mneme-procedural  : 107 tests
 mneme-causal      :  15 tests
@@ -571,7 +601,7 @@ mneme-kv          :  10 tests
 mneme-exchange    :  11 tests
 mneme-dream       :  10 tests
 mneme-provenance  :   7 tests
-mneme-bench       :  24 tests (+7 under --features fetch: SQuAD + HotpotQA loaders)
+mneme-bench       :  25 tests (+7 under --features fetch: SQuAD + HotpotQA loaders)
 mneme-mcp         :  26 tests (unit + integration)
 mneme-py          :   7 tests (Rust-side inner-client coverage)
 mneme-server      :  27 tests
@@ -581,7 +611,7 @@ mneme-extract     :  33 tests
 mneme-privacy     :  19 tests
 sdk/node (TS)     :   8 tests (offline, stub fetch)
 ──────────────────────────────
-TOTAL             : 461 Rust tests (458 on --no-default-features) + 8 SDK tests · all passing
+TOTAL             : 463 Rust tests (460 on --no-default-features) + 8 SDK tests · all passing
                     (+7 more with --features fetch on mneme-bench)
 ```
 
