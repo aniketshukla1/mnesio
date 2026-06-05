@@ -358,6 +358,7 @@ fn render_rejection_reasons(outcomes: &[CandidateOutcome]) -> String {
             .iter()
             .map(|r| match r {
                 RejectReason::BaselineFailed => "baseline",
+                RejectReason::NoCanaries => "no_canaries",
                 RejectReason::CanariesFailing { .. } => "canaries",
                 RejectReason::SafetyProbeFailed => "safety",
                 RejectReason::ObjectiveRegression { .. } => "objective",

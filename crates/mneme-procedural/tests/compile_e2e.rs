@@ -254,6 +254,7 @@ async fn fully_relaxed_gates_still_reject_baseline_failure_through_pipeline() {
             min_objective_delta: f32::NEG_INFINITY,
             min_replay_success_rate: 0.0,
             min_judges: 0,
+            require_canaries: false,
         });
     let inputs = ShadowInputs {
         baseline: active.clone(),

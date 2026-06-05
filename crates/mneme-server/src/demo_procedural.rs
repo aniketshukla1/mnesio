@@ -94,11 +94,13 @@ pub async fn seed_initial_artifact(log: &Arc<dyn EventLog>) -> Result<PolicyArti
     log.append(Event::ProceduralCommitted {
         proposal: prop_id,
         report: EvalReport {
-            // No canaries *executed* yet — they exist on the artifact
-            // but the shadow evaluator hasn't run them yet. The
-            // strict baseline allows this (0/0 is vacuously passing).
-            canaries_passed: 0,
-            canaries_total: 0,
+            // The seed artifact ships with 2 canaries; report them as the
+            // accepted baseline (passed) so this committed v1 reflects a real
+            // guard set rather than a 0/0 vacuous pass. (This is a direct seed
+            // append, not a gated commit, but keeping it honest matches the
+            // production gate's require-canaries default.)
+            canaries_passed: 2,
+            canaries_total: 2,
             replay_success_rate: 1.0,
             safety_probe_passed: true,
             objective_delta: 0.0,

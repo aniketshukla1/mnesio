@@ -543,6 +543,10 @@ mod tests {
     }
 
     fn happy_compiler() -> Arc<ProceduralCompiler> {
+        // These tests exercise the *scheduler* (trigger batching, apply,
+        // version bump), not the canary gate — which is tested exhaustively
+        // in gate.rs. The test artifacts carry no canaries, so opt out of the
+        // default "require ≥1 canary" production gate here.
         let mut c = ProceduralCompiler::new(
             happy_llm(),
             Arc::new(FakePolicyExecutor::new().with_default("ok")),
@@ -551,7 +555,11 @@ mod tests {
                 Arc::new(FakeJudge::new("b")),
             ],
             1,
-        );
+        )
+        .with_gates(crate::gate::EvalGates {
+            require_canaries: false,
+            ..crate::gate::EvalGates::default()
+        });
         // Tight trigger for tests — fire on 2 outcomes, ignore the time bucket.
         c.trigger = CompileTrigger {
             min_batch: 2,

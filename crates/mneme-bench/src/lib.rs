@@ -280,10 +280,12 @@ pub async fn run_bench(
     let compiler = Arc::new(
         ProceduralCompiler::new(llm.clone(), executor.clone(), two_judges, 2).with_gates(
             EvalGates {
-                // Relaxed canary-rate floor since bench artifacts have
-                // zero canaries (the suite IS the gate signal). The
-                // baseline gate's "100% of 0 canaries pass" is vacuously
-                // true so this doesn't actually loosen anything.
+                // Bench artifacts carry zero canaries on purpose — the eval
+                // *suite* is the gate signal here, not a canary set. So we
+                // opt out of the default "require ≥1 canary" production gate
+                // (an explicit, reviewed exception). The baseline's "100% of
+                // 0 canaries pass" remains vacuously true.
+                require_canaries: false,
                 ..EvalGates::default()
             },
         ),

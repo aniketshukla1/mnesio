@@ -594,7 +594,7 @@ mneme-core        :   3 tests
 mneme-llm         :  11 tests
 mneme-index       :  83 tests
 mneme-evolve      :  27 tests
-mneme-procedural  : 111 tests
+mneme-procedural  : 112 tests
 mneme-causal      :  15 tests
 mneme-probe       :  14 tests
 mneme-kv          :  10 tests
@@ -611,7 +611,7 @@ mneme-extract     :  33 tests
 mneme-privacy     :  22 tests
 sdk/node (TS)     :   8 tests (offline, stub fetch)
 ──────────────────────────────
-TOTAL             : 478 Rust tests (475 on --no-default-features) + 8 SDK tests · all passing
+TOTAL             : 479 Rust tests (476 on --no-default-features) + 8 SDK tests · all passing
                     (+7 more with --features fetch on mneme-bench)
 ```
 
