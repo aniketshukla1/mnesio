@@ -14,7 +14,55 @@ use crate::protocol::{
     ResponseError, ServerCapabilities, ServerInfo, PROTOCOL_VERSION,
 };
 use crate::tools;
-use serde_json::json;
+use serde_json::{json, Value};
+
+/// Process one raw newline-delimited input line end to end: parse JSON, shape
+/// it into a [`Request`], and dispatch. Returns `None` for blank lines and
+/// notifications (nothing is written); `Some(Response)` otherwise.
+///
+/// Error classification follows JSON-RPC 2.0, so a hostile or buggy client
+/// gets the *correct* error instead of a crash:
+/// - unparseable JSON → [`error_codes::PARSE_ERROR`] (-32700) with a null id
+///   (the id is unknowable when the bytes don't parse)
+/// - valid JSON that isn't a well-formed request (missing `method`, a batch
+///   array, wrong field types) → [`error_codes::INVALID_REQUEST`] (-32600),
+///   echoing the `id` if one was recoverable from the raw value
+///
+/// This is the single line-processing seam `main` drives, extracted here so
+/// the adversarial-input paths are unit-testable without a subprocess.
+pub async fn process_line(ctx: &AppContext, line: &str) -> Option<Response> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // Stage 1 — is it even JSON? Truly malformed bytes are a parse error.
+    let value: Value = match serde_json::from_str(trimmed) {
+        Ok(v) => v,
+        Err(e) => {
+            return Some(Response::failure(
+                Value::Null,
+                ResponseError::new(error_codes::PARSE_ERROR, format!("invalid JSON: {e}")),
+            ));
+        }
+    };
+    // Stage 2 — valid JSON, but is it a well-formed Request? If not, it's an
+    // invalid *request*, not a parse error — and we recover the id if we can
+    // so the client can correlate the error with what it sent.
+    let req: Request = match serde_json::from_value(value.clone()) {
+        Ok(r) => r,
+        Err(e) => {
+            let id = value.get("id").cloned().unwrap_or(Value::Null);
+            return Some(Response::failure(
+                id,
+                ResponseError::new(
+                    error_codes::INVALID_REQUEST,
+                    format!("invalid request: {e}"),
+                ),
+            ));
+        }
+    };
+    handle_request(ctx, req).await
+}
 
 /// Handle a single decoded JSON-RPC request. Returns `Some(Response)`
 /// for requests that need a reply; `None` for notifications (no id).
@@ -197,5 +245,146 @@ mod tests {
         let r = handle_request(&ctx, bad).await.unwrap();
         let err = r.error.unwrap();
         assert_eq!(err.code, error_codes::INVALID_PARAMS);
+    }
+
+    // ---------------- adversarial process_line input ----------------
+    // The line layer is untrusted: a hostile or buggy client can send
+    // anything. Every case must yield a correct JSON-RPC error, never a panic.
+
+    #[tokio::test]
+    async fn unparseable_json_is_parse_error_with_null_id() {
+        let (_dir, ctx) = fresh_ctx().await;
+        for bad in [
+            "{not json",
+            "{\"jsonrpc\": ",
+            "}{",
+            "\"unterminated",
+            "\u{0}\u{1}\u{2}",
+        ] {
+            let r = process_line(&ctx, bad).await.unwrap();
+            let err = r.error.unwrap();
+            assert_eq!(err.code, error_codes::PARSE_ERROR, "input {bad:?}");
+            assert_eq!(r.id, serde_json::Value::Null);
+        }
+    }
+
+    #[tokio::test]
+    async fn blank_and_whitespace_lines_produce_no_response() {
+        let (_dir, ctx) = fresh_ctx().await;
+        assert!(process_line(&ctx, "").await.is_none());
+        assert!(process_line(&ctx, "   \t  ").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn valid_json_wrong_shape_is_invalid_request_and_recovers_id() {
+        let (_dir, ctx) = fresh_ctx().await;
+        // Valid JSON, but no `method` field → not a well-formed request.
+        let r = process_line(&ctx, r#"{"jsonrpc":"2.0","id":7}"#)
+            .await
+            .unwrap();
+        let err = r.error.as_ref().unwrap();
+        assert_eq!(err.code, error_codes::INVALID_REQUEST);
+        assert_eq!(r.id, json!(7), "id must be echoed back when recoverable");
+
+        // A batch array is valid JSON but unsupported → invalid request,
+        // not a panic.
+        let r = process_line(&ctx, r#"[{"jsonrpc":"2.0","id":1,"method":"x"}]"#)
+            .await
+            .unwrap();
+        assert_eq!(r.error.unwrap().code, error_codes::INVALID_REQUEST);
+
+        // A bare JSON scalar is valid JSON, invalid request.
+        let r = process_line(&ctx, "42").await.unwrap();
+        assert_eq!(r.error.unwrap().code, error_codes::INVALID_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn string_and_null_ids_round_trip() {
+        let (_dir, ctx) = fresh_ctx().await;
+        // String id (valid per JSON-RPC) must be echoed verbatim.
+        let r = process_line(
+            &ctx,
+            r#"{"jsonrpc":"2.0","id":"abc-123","method":"tools/list"}"#,
+        )
+        .await
+        .unwrap();
+        assert_eq!(r.id, json!("abc-123"));
+        assert!(r.result.is_some());
+
+        // No id → notification → no response.
+        assert!(
+            process_line(&ctx, r#"{"jsonrpc":"2.0","method":"tools/list"}"#)
+                .await
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_and_deeply_nested_params_do_not_panic() {
+        let (_dir, ctx) = fresh_ctx().await;
+
+        // ~1 MB of content through the real write path — must succeed, not
+        // panic or error at the transport layer.
+        let big = "x".repeat(1_000_000);
+        let line = serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "mneme_write_memory", "arguments": {"content": big}}
+        }))
+        .unwrap();
+        let r = process_line(&ctx, &line).await.unwrap();
+        assert!(r.result.is_some(), "1MB content should write, not crash");
+
+        // Deeply nested JSON: serde_json caps recursion and returns an error
+        // rather than overflowing the stack. We just require no panic.
+        let deep = format!("{}{}{}", "[".repeat(20_000), "1", "]".repeat(20_000));
+        let r = process_line(&ctx, &deep).await;
+        assert!(r.is_some(), "deep nesting handled without panic");
+    }
+
+    #[tokio::test]
+    async fn wrong_typed_tool_arguments_fail_gracefully() {
+        let (_dir, ctx) = fresh_ctx().await;
+        // `content` should be a string; pass a number. The tool returns a
+        // tool-level error result (is_error), not a transport crash.
+        let r = handle_request(
+            &ctx,
+            req(
+                1,
+                "tools/call",
+                json!({"name": "mneme_write_memory", "arguments": {"content": 12345}}),
+            ),
+        )
+        .await
+        .unwrap();
+        // Either an INVALID_PARAMS transport error or a tool-level error
+        // result is acceptable — the invariant is "no panic, structured error".
+        let surfaced_error = r.error.is_some()
+            || r.result
+                .as_ref()
+                .and_then(|v| v.get("isError"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+        assert!(
+            surfaced_error,
+            "wrong-typed arg must surface a structured error"
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_tool_name_is_invalid_params_not_panic() {
+        let (_dir, ctx) = fresh_ctx().await;
+        let r = handle_request(
+            &ctx,
+            req(
+                1,
+                "tools/call",
+                json!({"name": "mneme_drop_table", "arguments": {}}),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r.error.unwrap().code, error_codes::INVALID_PARAMS);
     }
 }

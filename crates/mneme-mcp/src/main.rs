@@ -13,8 +13,7 @@
 
 use anyhow::Result;
 use mneme_mcp::context::AppContext;
-use mneme_mcp::handler::handle_request;
-use mneme_mcp::protocol::{error_codes, Request, Response, ResponseError};
+use mneme_mcp::handler::process_line;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -49,29 +48,12 @@ async fn main() -> Result<()> {
     let mut stdout = tokio::io::stdout();
 
     while let Some(line) = reader.next_line().await? {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        // Parse the line. Parse errors return a JSON-RPC error
-        // response with a null id (we don't know what the id was if
-        // the request didn't parse).
-        let response = match serde_json::from_str::<Request>(trimmed) {
-            Ok(req) => match handle_request(&ctx, req).await {
-                Some(r) => Some(r),
-                None => continue, // notification — nothing to write
-            },
-            Err(e) => {
-                tracing::warn!(error = %e, line = %trimmed, "parse error");
-                Some(Response::failure(
-                    serde_json::Value::Null,
-                    ResponseError::new(error_codes::PARSE_ERROR, format!("invalid JSON: {e}")),
-                ))
-            }
-        };
-        if let Some(resp) = response {
-            let line = serde_json::to_string(&resp)?;
-            stdout.write_all(line.as_bytes()).await?;
+        // All parsing + dispatch + JSON-RPC error classification lives in
+        // `process_line` (unit-tested against adversarial input). `None`
+        // means a blank line or a notification — nothing to write.
+        if let Some(resp) = process_line(&ctx, &line).await {
+            let out = serde_json::to_string(&resp)?;
+            stdout.write_all(out.as_bytes()).await?;
             stdout.write_all(b"\n").await?;
             stdout.flush().await?;
         }
