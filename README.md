@@ -601,7 +601,7 @@ mneme-kv          :  10 tests
 mneme-exchange    :  11 tests (+4 under --features ed25519: real signatures)
 mneme-dream       :  10 tests
 mneme-provenance  :   8 tests
-mneme-bench       :  25 tests (+7 under --features fetch: SQuAD + HotpotQA loaders)
+mneme-bench       :  27 tests (+7 under --features fetch: SQuAD + HotpotQA loaders)
 mneme-mcp         :  33 tests (unit + integration)
 mneme-py          :   7 tests (Rust-side inner-client coverage)
 mneme-server      :  27 tests

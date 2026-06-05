@@ -39,6 +39,7 @@ pub mod edge;
 pub mod fetch;
 pub mod gen;
 pub mod memeval;
+pub mod qaeval;
 pub mod report;
 pub mod scale;
 use serde::Deserialize;

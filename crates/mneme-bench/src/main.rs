@@ -57,10 +57,70 @@ async fn main() -> Result<()> {
         Command::MemEval(opts) => cmd_memeval(opts).await,
         Command::Scale(opts) => cmd_scale(opts).await,
         Command::Compete(opts) => cmd_compete(opts).await,
+        Command::QaEval(opts) => cmd_qaeval(opts).await,
         Command::Edge => cmd_edge().await,
         #[cfg(feature = "fetch")]
         Command::Fetch(opts) => cmd_fetch(opts).await,
     }
+}
+
+// ---------------- qaeval (end-to-end LLM-judged QA accuracy) ----------------
+
+/// Build the LLM used for both answer generation and judging.
+fn build_qa_llm(choice: &str) -> Result<Arc<dyn LlmClient>> {
+    match choice {
+        "demo" => Ok(Arc::new(DemoBenchLlm)),
+        #[cfg(feature = "ollama")]
+        "ollama" => Ok(Arc::new(mneme_llm::OllamaLlmClient::from_env()?)),
+        #[cfg(not(feature = "ollama"))]
+        "ollama" => bail!(
+            "--llm ollama requires the `ollama` feature; rebuild with \
+             `cargo run -p mneme-bench --features ollama -- qaeval --llm ollama ...` \
+             and a running Ollama (MNEME_OLLAMA_MODEL / OLLAMA_HOST)"
+        ),
+        other => bail!("unknown --llm {other:?}; expected `demo` or `ollama`"),
+    }
+}
+
+async fn cmd_qaeval(opts: QaEvalOpts) -> Result<()> {
+    use mneme_bench::qaeval::run_qaeval;
+
+    let json = match opts.suite.as_str() {
+        "locomo" => LOCOMO_JSON,
+        "longmemeval" => LONGMEMEVAL_JSON,
+        other => bail!("unknown --suite {other:?}; expected `locomo` or `longmemeval`"),
+    };
+    let suite = load_memeval_suite(json)?;
+    let llm = build_qa_llm(&opts.llm)?;
+
+    eprintln!(
+        "# mneme-bench qaeval · suite={} · k={} · embedder={} · llm={}",
+        suite.name, opts.k, opts.embedder, opts.llm
+    );
+    let report = run_qaeval(&suite, opts.k, &opts.embedder, llm.as_ref(), &opts.llm).await?;
+
+    eprintln!("# summary:");
+    eprintln!("#   suite:     {}", report.suite_name);
+    eprintln!("#   embedder:  {}", report.embedder);
+    eprintln!("#   llm:       {}", report.llm);
+    eprintln!(
+        "#   QA accuracy: {:.1}% ({}/{})",
+        report.accuracy() * 100.0,
+        report.correct,
+        report.total
+    );
+    eprintln!(
+        "#   mean latency: {:.1} ms/question",
+        report.mean_latency_ms
+    );
+    if !report.is_real() {
+        eprintln!(
+            "# NOTE: `demo` LLM is a deterministic stand-in — this accuracy is a \
+             plumbing artifact, NOT a publishable number. Use `--llm ollama` \
+             (built with --features ollama) against a real model for a real QA-J score."
+        );
+    }
+    Ok(())
 }
 
 // ---------------- edge (adversarial / edge-case stress) ----------------
@@ -763,6 +823,7 @@ enum Command {
     MemEval(MemEvalOpts),
     Scale(ScaleOpts),
     Compete(CompeteOpts),
+    QaEval(QaEvalOpts),
     Edge,
     #[cfg(feature = "fetch")]
     Fetch(FetchOpts),
@@ -772,6 +833,14 @@ struct CompeteOpts {
     k: usize,
     embedder: String,
     out_path: Option<std::path::PathBuf>,
+}
+
+struct QaEvalOpts {
+    suite: String,
+    k: usize,
+    embedder: String,
+    /// `demo` (deterministic stand-in) or `ollama` (real, needs the feature).
+    llm: String,
 }
 
 #[cfg(feature = "fetch")]
@@ -868,6 +937,10 @@ fn parse_args() -> Result<RootArgs> {
             iter.next();
             "compete"
         }
+        Some("qaeval") => {
+            iter.next();
+            "qaeval"
+        }
         Some("edge") => {
             iter.next();
             "edge"
@@ -900,6 +973,9 @@ fn parse_args() -> Result<RootArgs> {
         }),
         "compete" => Ok(RootArgs {
             command: Command::Compete(parse_compete(iter)?),
+        }),
+        "qaeval" => Ok(RootArgs {
+            command: Command::QaEval(parse_qaeval(iter)?),
         }),
         "edge" => {
             // No options beyond --help; reject stray args for consistency.
@@ -1020,6 +1096,29 @@ fn parse_compete(
             "--k" => opts.k = next_value(&mut iter, "--k")?.parse()?,
             "--embedder" => opts.embedder = next_value(&mut iter, "--embedder")?,
             "--out" => opts.out_path = Some(next_value(&mut iter, "--out")?.into()),
+            "--help" | "-h" => {
+                print_help();
+                std::process::exit(0);
+            }
+            other => bail!("unknown argument {other:?}; pass --help for usage"),
+        }
+    }
+    Ok(opts)
+}
+
+fn parse_qaeval(mut iter: std::iter::Peekable<impl Iterator<Item = String>>) -> Result<QaEvalOpts> {
+    let mut opts = QaEvalOpts {
+        suite: "locomo".into(),
+        k: 10,
+        embedder: "mock".into(),
+        llm: "demo".into(),
+    };
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--suite" => opts.suite = next_value(&mut iter, "--suite")?,
+            "--k" => opts.k = next_value(&mut iter, "--k")?.parse()?,
+            "--embedder" => opts.embedder = next_value(&mut iter, "--embedder")?,
+            "--llm" => opts.llm = next_value(&mut iter, "--llm")?,
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -1162,6 +1261,8 @@ fn print_help() {
          \x20\x20             over a deterministic synthetic corpus (1k–100k+)\n\
          \x20\x20compete    competitive comparison: mneme's measured recall + capability\n\
          \x20\x20             matrix + cited competitor QA scores (Mem0/Zep papers)\n\
+         \x20\x20qaeval     end-to-end LLM-judged QA accuracy (retrieve→answer→judge);\n\
+         \x20\x20             real numbers need --llm ollama (--features ollama)\n\
          \x20\x20edge       adversarial / edge-case stress: hard-rule invariants under\n\
          \x20\x20             hostile inputs (exits 1 on any violation — CI gate)\n\
          \x20\x20fetch      download a REAL public benchmark (SQuAD/HotpotQA) + run recall@k\n\
@@ -1182,6 +1283,12 @@ fn print_help() {
          \x20\x20--seed           generator seed                  (default: 42)\n\
          \x20\x20--out PATH       CSV output file                 (default: stdout)\n\
          \x20\x20--min-recall N   exit 1 if any size's recall@k < N (CI gate)\n\
+         \n\
+         QAEVAL OPTIONS:\n\
+         \x20\x20--suite          locomo | longmemeval             (default: locomo)\n\
+         \x20\x20--k              top-k retrieved as context       (default: 10)\n\
+         \x20\x20--embedder       mock | fastembed                 (default: mock)\n\
+         \x20\x20--llm            demo | ollama                    (default: demo)\n\
          \n\
          MEMEVAL OPTIONS:\n\
          \x20\x20--suite          locomo | longmemeval             (default: locomo)\n\
