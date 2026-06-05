@@ -83,6 +83,17 @@ determinism, concurrent writes) and asserts the seven hard-rule invariants.
 Exits non-zero on any violation (CI gate). This suite found and fixed a real
 BM25 bug where adversarial queries 500'd instead of returning empty.
 
+### `qaeval` — end-to-end LLM-judged QA accuracy
+Measures **answer correctness** (the metric LOCOMO/LongMemEval headline), not
+just retrieval recall: retrieve context → an LLM answers from it → an LLM judges
+the answer against the gold reference. `--llm demo` is a deterministic offline
+stand-in (its accuracy is a plumbing artifact, flagged as such); `--llm ollama`
+(build `--features ollama`, with a running Ollama) produces a **real** number.
+
+Measured live (llama3.2 3B via local Ollama, fastembed retrieval): LOCOMO-mini
+100% (10/10) @ ~1.76 s/q, LongMemEval-mini 100% (10/10) @ ~1.38 s/q — curated
+mini-suites, so 100% is a small set; run the full splits for a headline number.
+
 ### `fetch` — real public benchmark *(feature `fetch`)*
 Downloads a real dataset from the Hugging Face datasets-server, projects it into
 a recall suite, caches it to disk, and runs `memeval` over it. Two datasets:

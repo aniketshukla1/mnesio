@@ -551,10 +551,31 @@ storage-shaped system can't add without rebuilding its foundation.
 These are competitor/baseline numbers from the cited papers — **not mneme's**.
 mneme's *measured* numbers are retrieval recall@k: **98.1%** on real SQuAD
 (fastembed, §Scale & real-data above) and 100% on the curated LOCOMO/
-LongMemEval mini-suites. An apples-to-apples QA-accuracy run would put an LLM
-judge over mneme's retrieved context (mneme ships the `Judge` + synthesizer
-path for it; it's just not part of the offline CI number). mneme's
-differentiation is the capability matrix, not a single leaderboard cell.
+LongMemEval mini-suites. mneme's differentiation is the capability matrix, not
+a single leaderboard cell.
+
+### mneme — end-to-end LLM-judged QA accuracy (real, not recall)
+
+mneme also ships the *same* metric the papers above report — end-to-end
+**QA accuracy** via `mneme-bench qaeval` (retrieve → an LLM answers from the
+retrieved context → an LLM judges the answer vs the gold reference):
+
+```bash
+cargo run -p mneme-bench --features ollama --release -- \
+  qaeval --suite locomo --k 10 --embedder fastembed --llm ollama
+```
+
+| Suite | Retrieval | Answer + Judge LLM | QA accuracy | ms/question |
+|---|---|---|---:|---:|
+| LOCOMO-mini | fastembed | llama3.2 3B (Ollama, local) | 100% (10/10) | 1,765 |
+| LongMemEval-mini | fastembed | llama3.2 3B (Ollama, local) | 100% (10/10) | 1,377 |
+
+Measured live against a local Ollama model — a real LLM in the loop for both
+the answer and the judgement, not the offline stand-in. These are the **curated
+mini-suites** (10 questions each), so 100% reflects a small set; the point is
+that the harness produces a *real* QA-J number through the same ingest →
+hybrid-retrieve path. Run the full LOCOMO/LongMemEval splits through `qaeval`
+(any `--llm ollama` model) for a publishable headline number.
 
 ---
 
