@@ -77,12 +77,13 @@ async fn cmd_scale(opts: ScaleOpts) -> Result<()> {
         eprintln!("# … ingesting {n} memories (embedder={})", opts.embedder);
         let r = run_scale_point(n, opts.seed, opts.k, &opts.embedder).await?;
         eprintln!(
-            "#   N={:<7} ingest={:.1}s  write={:.0}/s  q_p50={:.2}ms q_p95={:.2}ms q_p99={:.2}ms  recall@{}={:.1}%  slots={}",
+            "#   N={:<7} append={:.0}/s (p50 {:.2}ms)  index={:.0}/s (p50 {:.2}ms)  q_p50={:.2}ms q_p99={:.2}ms  recall@{}={:.1}%  slots={}",
             r.ingested,
-            r.ingest_secs,
-            r.write_throughput_per_sec,
+            r.append_throughput_per_sec,
+            r.append_p50_ms,
+            r.index_throughput_per_sec,
+            r.index_p50_ms,
             r.query_p50_ms,
-            r.query_p95_ms,
             r.query_p99_ms,
             r.k,
             r.recall() * 100.0,
@@ -95,20 +96,22 @@ async fn cmd_scale(opts: ScaleOpts) -> Result<()> {
 
     write_output(&opts.out_path, &csv)?;
 
-    // Human-readable summary table to stderr.
+    // Human-readable summary table to stderr. Append (the <5ms write path) is
+    // reported separately from the async index build, per Hard Rule #5.
     eprintln!("\n# scale summary (embedder={})", opts.embedder);
     eprintln!(
-        "# {:>8} {:>10} {:>10} {:>9} {:>9} {:>9} {:>9}",
-        "memories", "write/s", "ingest_s", "q_p50ms", "q_p95ms", "q_p99ms", "recall"
+        "# {:>8} {:>10} {:>10} {:>10} {:>10} {:>9} {:>9} {:>8}",
+        "memories", "append/s", "app_p50ms", "index/s", "idx_p50ms", "q_p50ms", "q_p99ms", "recall"
     );
     for r in &reports {
         eprintln!(
-            "# {:>8} {:>10.0} {:>10.1} {:>9.2} {:>9.2} {:>9.2} {:>8.1}%",
+            "# {:>8} {:>10.0} {:>10.3} {:>10.0} {:>10.3} {:>9.2} {:>9.2} {:>7.1}%",
             r.ingested,
-            r.write_throughput_per_sec,
-            r.ingest_secs,
+            r.append_throughput_per_sec,
+            r.append_p50_ms,
+            r.index_throughput_per_sec,
+            r.index_p50_ms,
             r.query_p50_ms,
-            r.query_p95_ms,
             r.query_p99_ms,
             r.recall() * 100.0,
         );

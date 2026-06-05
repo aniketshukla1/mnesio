@@ -1,9 +1,15 @@
 //! Scale + load harness: ingest a large synthetic corpus through the *real*
 //! storage → views → retriever path and measure how mneme behaves at size.
 //!
-//! Reports, per N:
-//! - **write throughput** (memories/sec) + ingest wall time
-//! - **per-write latency** p50 / p95 (append + vector apply + bm25 apply)
+//! Reports, per N — and crucially it **separates the two phases** so the
+//! numbers reflect mneme's real architecture (Hard Rule #5: the write path is
+//! the log append; embedding + indexing are async behind a bounded queue):
+//! - **append path** — log-append throughput (mem/s) + p50/p95 latency. This
+//!   is the user-facing write path the <5ms target governs.
+//! - **index build** — vector(HNSW) + BM25 apply throughput + p50/p95. In the
+//!   server this runs in the async embedding/index workers, *off* the write
+//!   path; here we measure it separately so its cost is visible, not conflated
+//!   with the append.
 //! - **query latency** p50 / p95 / p99 over the labeled needle set
 //! - **recall@k** against the generator's unambiguous gold tokens
 //! - **index observability** (`VectorView` slot/tombstone/live counts)
@@ -40,11 +46,17 @@ pub struct ScaleReport {
     pub ingested: usize,
     pub needles: usize,
 
-    // ingest
-    pub ingest_secs: f64,
-    pub write_throughput_per_sec: f64,
-    pub write_p50_ms: f64,
-    pub write_p95_ms: f64,
+    // append path (the real <5ms write path: log append only)
+    pub append_secs: f64,
+    pub append_throughput_per_sec: f64,
+    pub append_p50_ms: f64,
+    pub append_p95_ms: f64,
+
+    // index build (async in the server: vector HNSW + BM25 apply)
+    pub index_secs: f64,
+    pub index_throughput_per_sec: f64,
+    pub index_p50_ms: f64,
+    pub index_p95_ms: f64,
 
     // query
     pub query_p50_ms: f64,
@@ -112,12 +124,18 @@ pub async fn run_scale_point(
 
     // Map gold-bearing memories so recall can be scored by content.
     let mut content_by_id: HashMap<MemoryRef, String> = HashMap::new();
-    let mut write_latencies_ms: Vec<f64> = Vec::with_capacity(corpus.memories.len());
+    let mut append_latencies_ms: Vec<f64> = Vec::with_capacity(corpus.memories.len());
+    let mut index_latencies_ms: Vec<f64> = Vec::with_capacity(corpus.memories.len());
 
-    let ingest_start = Instant::now();
-    // Ingest in batches: embed the batch (one model call), then append + apply
-    // per memory, timing the per-write path (append + both view applies).
+    // Phase 1 — APPEND: write every memory to the log. This is mneme's real
+    // user-facing write path (Hard Rule #5: <5ms target). Embedding runs in
+    // batches first so the model call isn't charged to the append timing — the
+    // server's embedding worker does this off the write path too. We retain the
+    // resulting LogEntries to drive the index phase next.
     let mems = &corpus.memories;
+    let mut entries: Vec<LogEntry> = Vec::with_capacity(mems.len());
+
+    let append_start = Instant::now();
     let mut idx = 0;
     while idx < mems.len() {
         let end = (idx + EMBED_BATCH).min(mems.len());
@@ -153,25 +171,37 @@ pub async fn run_scale_point(
             }
             let event = Event::MemoryWritten(mem);
 
-            // Time the per-write critical path.
+            // Time the append-only critical path (the <5ms write path).
             let w = Instant::now();
             let id = log
                 .append(event.clone())
                 .await
                 .map_err(|e| anyhow!("append: {e}"))?;
-            let entry = LogEntry { id, event };
-            vector
-                .apply(&entry)
-                .await
-                .map_err(|e| anyhow!("vector apply: {e}"))?;
-            bm25.apply(&entry)
-                .await
-                .map_err(|e| anyhow!("bm25 apply: {e}"))?;
-            write_latencies_ms.push(w.elapsed().as_secs_f64() * 1000.0);
+            append_latencies_ms.push(w.elapsed().as_secs_f64() * 1000.0);
+
+            entries.push(LogEntry { id, event });
         }
         idx = end;
     }
-    let ingest_secs = ingest_start.elapsed().as_secs_f64();
+    let append_secs = append_start.elapsed().as_secs_f64();
+
+    // Phase 2 — INDEX BUILD: apply each entry to the vector (HNSW) + BM25 views.
+    // In the server this is the async embedding/index workers, *off* the write
+    // path; timed separately so HNSW build cost is visible, not blamed on the
+    // append.
+    let index_start = Instant::now();
+    for entry in &entries {
+        let w = Instant::now();
+        vector
+            .apply(entry)
+            .await
+            .map_err(|e| anyhow!("vector apply: {e}"))?;
+        bm25.apply(entry)
+            .await
+            .map_err(|e| anyhow!("bm25 apply: {e}"))?;
+        index_latencies_ms.push(w.elapsed().as_secs_f64() * 1000.0);
+    }
+    let index_secs = index_start.elapsed().as_secs_f64();
 
     let retriever = HybridRetriever::new(vector.clone(), bm25, embedder.clone());
 
@@ -204,24 +234,26 @@ pub async fn run_scale_point(
         }
     }
 
-    write_latencies_ms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    append_latencies_ms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    index_latencies_ms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     query_latencies_ms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let ingested = corpus.memories.len();
+    let per_sec = |count: usize, secs: f64| if secs > 0.0 { count as f64 / secs } else { 0.0 };
     let report = ScaleReport {
         n,
         embedder: embedder_choice.to_string(),
         k,
         ingested,
         needles: corpus.needles.len(),
-        ingest_secs,
-        write_throughput_per_sec: if ingest_secs > 0.0 {
-            ingested as f64 / ingest_secs
-        } else {
-            0.0
-        },
-        write_p50_ms: percentile(&write_latencies_ms, 50.0),
-        write_p95_ms: percentile(&write_latencies_ms, 95.0),
+        append_secs,
+        append_throughput_per_sec: per_sec(ingested, append_secs),
+        append_p50_ms: percentile(&append_latencies_ms, 50.0),
+        append_p95_ms: percentile(&append_latencies_ms, 95.0),
+        index_secs,
+        index_throughput_per_sec: per_sec(ingested, index_secs),
+        index_p50_ms: percentile(&index_latencies_ms, 50.0),
+        index_p95_ms: percentile(&index_latencies_ms, 95.0),
         query_p50_ms: percentile(&query_latencies_ms, 50.0),
         query_p95_ms: percentile(&query_latencies_ms, 95.0),
         query_p99_ms: percentile(&query_latencies_ms, 99.0),
@@ -238,7 +270,9 @@ pub async fn run_scale_point(
 
 /// CSV header for a scale sweep.
 pub fn scale_csv_header() -> String {
-    "n,embedder,k,ingested,needles,ingest_secs,write_per_sec,write_p50_ms,write_p95_ms,\
+    "n,embedder,k,ingested,needles,\
+     append_secs,append_per_sec,append_p50_ms,append_p95_ms,\
+     index_secs,index_per_sec,index_p50_ms,index_p95_ms,\
      query_p50_ms,query_p95_ms,query_p99_ms,recall,slot_count,live_count,tombstones"
         .to_string()
 }
@@ -246,16 +280,23 @@ pub fn scale_csv_header() -> String {
 /// One CSV row.
 pub fn scale_csv_row(r: &ScaleReport) -> String {
     format!(
-        "{},{},{},{},{},{:.3},{:.1},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{},{},{}",
+        "{},{},{},{},{},\
+         {:.3},{:.1},{:.4},{:.4},\
+         {:.3},{:.1},{:.4},{:.4},\
+         {:.4},{:.4},{:.4},{:.4},{},{},{}",
         r.n,
         r.embedder,
         r.k,
         r.ingested,
         r.needles,
-        r.ingest_secs,
-        r.write_throughput_per_sec,
-        r.write_p50_ms,
-        r.write_p95_ms,
+        r.append_secs,
+        r.append_throughput_per_sec,
+        r.append_p50_ms,
+        r.append_p95_ms,
+        r.index_secs,
+        r.index_throughput_per_sec,
+        r.index_p50_ms,
+        r.index_p95_ms,
         r.query_p50_ms,
         r.query_p95_ms,
         r.query_p99_ms,
@@ -293,12 +334,21 @@ mod tests {
         );
         assert_eq!(r.tombstone_count, 0);
         assert!(r.needles > 0, "should have needles at N=400");
-        assert!(r.write_throughput_per_sec > 0.0);
+        assert!(r.append_throughput_per_sec > 0.0);
+        assert!(r.index_throughput_per_sec > 0.0);
         // Gold tokens are exact + unique, so BM25 must recall ~all of them.
         assert!(
             r.recall() > 0.9,
             "exact unique gold tokens should be highly recalled; got {}",
             r.recall()
+        );
+        // Append should be much cheaper than the HNSW index apply — that's the
+        // whole point of separating them (the <5ms write path vs async build).
+        assert!(
+            r.append_p50_ms <= r.index_p50_ms + 1e-9,
+            "append p50 {} should be ≤ index p50 {}",
+            r.append_p50_ms,
+            r.index_p50_ms
         );
         // Latencies are real, non-negative, and ordered p50 ≤ p95 ≤ p99.
         assert!(r.query_p50_ms <= r.query_p95_ms + 1e-9);
@@ -315,10 +365,14 @@ mod tests {
             k: 10,
             ingested: 1,
             needles: 0,
-            ingest_secs: 0.1,
-            write_throughput_per_sec: 10.0,
-            write_p50_ms: 0.1,
-            write_p95_ms: 0.2,
+            append_secs: 0.05,
+            append_throughput_per_sec: 20.0,
+            append_p50_ms: 0.05,
+            append_p95_ms: 0.1,
+            index_secs: 0.1,
+            index_throughput_per_sec: 10.0,
+            index_p50_ms: 0.1,
+            index_p95_ms: 0.2,
             query_p50_ms: 0.1,
             query_p95_ms: 0.2,
             query_p99_ms: 0.3,
