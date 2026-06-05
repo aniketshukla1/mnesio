@@ -33,12 +33,18 @@
 //! - **#3 (scope is a boundary):** the scorer operates on a candidate list the
 //!   caller has already scoped; GC emits `MemoryInvalidated` in that scope.
 //!
-//! ## Known limitation (don't pretend it's solved)
+//! ## Redundancy: LOO vs greedy ablation
 //!
-//! LOO underestimates contribution under **redundancy**: two memories each
-//! sufficient to answer a query both score ~0 individually, yet removing both
-//! drops the score. This is the Shapley-vs-LOO gap. v1 ships LOO + documents
-//! the gap; a greedy-ablation mode is `TODO(phase-10)`.
+//! [`ScoreMode::LeaveOneOut`] (cheap, `O(corpus)`) underestimates contribution
+//! under **redundancy**: two memories each sufficient to answer a query both
+//! score ~0 individually, yet removing both drops the score — the Shapley-vs-LOO
+//! gap. [`ScoreMode::GreedyAblation`] closes it: it ablates the least-valuable
+//! memory step by step, so once one of a redundant pair is masked the other
+//! becomes load-bearing and earns the set's full contribution. Greedy is a
+//! single Shapley permutation — exact on additive objectives and on the
+//! aggregate of a redundant set — at `O(corpus²)` eval cost (still bounded by
+//! `max_candidates`, Hard Rule #6). Pick LOO for cheap first-pass GC, greedy
+//! when redundancy would otherwise hide load-bearing memories.
 
 mod contribution;
 mod evaluator;

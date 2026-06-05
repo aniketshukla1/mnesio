@@ -28,16 +28,24 @@ pub trait CounterfactualEvaluator: Send + Sync {
     async fn evaluate(&self, masked: &HashSet<MemoryRef>) -> Result<f32, MnemeError>;
 }
 
-/// How contribution is attributed. Only LOO ships in v1.
+/// How contribution is attributed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScoreMode {
     /// Leave-one-out: mask exactly one memory at a time. Cheap (`O(corpus)`
-    /// evals) but underestimates contribution under redundancy — see the
-    /// crate-level "Known limitation".
+    /// evals) but underestimates contribution under redundancy — two memories
+    /// that cover the same fact each score ≈ 0 because the other still covers.
     LeaveOneOut,
-    // TODO(phase-10): GreedyAblation — iteratively mask the lowest-marginal
-    // memory and re-score, recovering redundant-set contribution the way a
-    // Shapley approximation would, at higher eval cost.
+    /// Greedy ablation: iteratively ablate the **least-valuable remaining**
+    /// memory (the one whose removal leaves the highest score) and re-score,
+    /// attributing each memory its *marginal* drop at the point it's removed.
+    ///
+    /// This recovers redundant-set contribution that LOO misses: once the
+    /// first of a redundant pair is masked, the second becomes load-bearing
+    /// and earns the set's full contribution at its removal step. It's a
+    /// single greedy permutation of the Shapley value — exact on additive
+    /// objectives, and on the *aggregate* of a redundant set, at the cost of
+    /// `O(corpus²)` evals (still bounded by `max_candidates`, Hard Rule #6).
+    GreedyAblation,
 }
 
 /// Bounds for one scoring pass. The engine never schedules itself; the caller
@@ -135,13 +143,23 @@ impl ContributionScorer {
         &self.cfg
     }
 
-    /// Score `candidates` against `evaluator`. Issues exactly
-    /// `1 + min(candidates.len(), max_candidates)` evaluator calls: one
-    /// baseline plus one masked eval per scored candidate.
-    ///
-    /// The caller is responsible for scoping `candidates` (Hard Rule #3) — the
-    /// scorer is scope-agnostic.
+    /// Score `candidates` against `evaluator`, dispatching on the configured
+    /// [`ScoreMode`]. The caller is responsible for scoping `candidates`
+    /// (Hard Rule #3) — the scorer is scope-agnostic.
     pub async fn score(
+        &self,
+        evaluator: &dyn CounterfactualEvaluator,
+        candidates: &[MemoryRef],
+    ) -> Result<ContributionReport, MnemeError> {
+        match self.cfg.mode {
+            ScoreMode::LeaveOneOut => self.score_loo(evaluator, candidates).await,
+            ScoreMode::GreedyAblation => self.score_greedy(evaluator, candidates).await,
+        }
+    }
+
+    /// Leave-one-out: one baseline + one masked eval per candidate. Issues
+    /// exactly `1 + min(candidates.len(), max_candidates)` evaluator calls.
+    async fn score_loo(
         &self,
         evaluator: &dyn CounterfactualEvaluator,
         candidates: &[MemoryRef],
@@ -156,6 +174,63 @@ impl ContributionScorer {
                 memory: *memory,
                 contribution: baseline - masked_score,
                 masked_score,
+            });
+        }
+        let candidates_scored = scored.len();
+        Ok(ContributionReport {
+            baseline_score: baseline,
+            mode: self.cfg.mode,
+            scored,
+            candidates_considered: candidates.len(),
+            candidates_scored,
+        })
+    }
+
+    /// Greedy ablation: repeatedly ablate the least-valuable remaining memory
+    /// (highest score when added to the masked set) and attribute it the
+    /// marginal drop at that step. Accumulates the masked set across steps so
+    /// redundant memories earn the set's contribution once the cover is gone.
+    ///
+    /// `scored` is returned in **ablation order** (least-contribution first);
+    /// `masked_score` is the cumulative score after that memory was ablated.
+    /// Cost: `1 + N(N+1)/2` evals for `N = min(candidates, max_candidates)`.
+    async fn score_greedy(
+        &self,
+        evaluator: &dyn CounterfactualEvaluator,
+        candidates: &[MemoryRef],
+    ) -> Result<ContributionReport, MnemeError> {
+        let baseline = evaluator.evaluate(&HashSet::new()).await?;
+        let mut remaining: Vec<MemoryRef> = candidates
+            .iter()
+            .take(self.cfg.max_candidates)
+            .copied()
+            .collect();
+        let mut masked: HashSet<MemoryRef> = HashSet::with_capacity(remaining.len());
+        let mut current = baseline;
+        let mut scored: Vec<MemoryContribution> = Vec::with_capacity(remaining.len());
+
+        while !remaining.is_empty() {
+            // Pick the memory whose ablation leaves the highest score — i.e.
+            // the least-valuable one to remove next.
+            let mut best_idx = 0usize;
+            let mut best_score = f32::NEG_INFINITY;
+            for (i, m) in remaining.iter().enumerate() {
+                masked.insert(*m);
+                let trial = evaluator.evaluate(&masked).await?;
+                masked.remove(m);
+                if trial > best_score {
+                    best_score = trial;
+                    best_idx = i;
+                }
+            }
+            let chosen = remaining.swap_remove(best_idx);
+            let contribution = current - best_score;
+            masked.insert(chosen);
+            current = best_score;
+            scored.push(MemoryContribution {
+                memory: chosen,
+                contribution,
+                masked_score: best_score,
             });
         }
         let candidates_scored = scored.len();
@@ -330,5 +405,118 @@ mod tests {
         assert_eq!(ranked[0].memory, b);
         assert_eq!(ranked[1].memory, c);
         assert_eq!(ranked[2].memory, a);
+    }
+
+    // --- greedy ablation -------------------------------------------------
+
+    /// A *redundant* capability: the objective gains `group_value` iff at least
+    /// one group member is unmasked. Masking a strict subset loses nothing;
+    /// masking the whole group loses `group_value`. This is the non-additive
+    /// case LOO can't score (each member ≈ 0) but greedy ablation can.
+    struct CoverageEvaluator {
+        baseline: f32,
+        group: HashSet<MemoryRef>,
+        group_value: f32,
+    }
+
+    impl CoverageEvaluator {
+        fn new(baseline: f32, group: &[MemoryRef], group_value: f32) -> Self {
+            Self {
+                baseline,
+                group: group.iter().copied().collect(),
+                group_value,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl CounterfactualEvaluator for CoverageEvaluator {
+        async fn evaluate(&self, masked: &HashSet<MemoryRef>) -> Result<f32, MnemeError> {
+            let cover_gone =
+                !self.group.is_empty() && self.group.iter().all(|m| masked.contains(m));
+            let lost = if cover_gone { self.group_value } else { 0.0 };
+            Ok((self.baseline - lost).clamp(0.0, 1.0))
+        }
+    }
+
+    fn greedy_scorer() -> ContributionScorer {
+        ContributionScorer::new(CausalConfig {
+            mode: ScoreMode::GreedyAblation,
+            ..CausalConfig::default()
+        })
+    }
+
+    #[tokio::test]
+    async fn greedy_recovers_redundant_set_contribution_loo_misses() {
+        let (a, b) = (mref(), mref());
+
+        // LOO: each member scores ≈ 0 because the other still covers → the
+        // set's real 0.4 contribution is missed entirely.
+        let loo = scorer()
+            .score(&CoverageEvaluator::new(0.8, &[a, b], 0.4), &[a, b])
+            .await
+            .unwrap();
+        let loo_sum: f32 = loo.scored.iter().map(|c| c.contribution).sum();
+        assert!(
+            loo_sum.abs() < 1e-6,
+            "LOO misses redundancy (≈0), got {loo_sum}"
+        );
+
+        // Greedy: recovers the full 0.4 (attributed to the last-removed member,
+        // once the cover is gone).
+        let greedy = greedy_scorer()
+            .score(&CoverageEvaluator::new(0.8, &[a, b], 0.4), &[a, b])
+            .await
+            .unwrap();
+        let greedy_sum: f32 = greedy.scored.iter().map(|c| c.contribution).sum();
+        assert!(
+            (greedy_sum - 0.4).abs() < 1e-6,
+            "greedy recovers the set's 0.4, got {greedy_sum}"
+        );
+        assert_eq!(greedy.mode, ScoreMode::GreedyAblation);
+    }
+
+    #[tokio::test]
+    async fn greedy_gc_keeps_one_of_a_redundant_pair() {
+        let (a, b) = (mref(), mref());
+        let report = greedy_scorer()
+            .score(&CoverageEvaluator::new(0.8, &[a, b], 0.4), &[a, b])
+            .await
+            .unwrap();
+        // Exactly one redundant copy is dead weight (its removal cost nothing
+        // because the other still covered); the cover itself is kept. LOO would
+        // wrongly GC *both* and lose the capability.
+        let gc = report.gc_candidates(1e-4);
+        assert_eq!(gc.len(), 1, "GC one copy, keep the cover; got {gc:?}");
+        let kept = report.high_contributors(0.3);
+        assert_eq!(kept.len(), 1, "the surviving cover carries the full 0.4");
+    }
+
+    #[tokio::test]
+    async fn greedy_matches_loo_on_additive_objective() {
+        // On an additive objective greedy and LOO agree — greedy is a strict
+        // generalisation, not a different answer where LOO is already correct.
+        let (helpful, inert, harmful) = (mref(), mref(), mref());
+        let mk = || {
+            FakeEvaluator::new(0.8)
+                .with_marginal(helpful, 0.4)
+                .with_marginal(inert, 0.0)
+                .with_marginal(harmful, -0.2)
+        };
+        let report = greedy_scorer()
+            .score(&mk(), &[helpful, inert, harmful])
+            .await
+            .unwrap();
+        let by = |m: MemoryRef| {
+            report
+                .scored
+                .iter()
+                .find(|c| c.memory == m)
+                .unwrap()
+                .contribution
+        };
+        assert!((by(helpful) - 0.4).abs() < 1e-6, "helpful ≈ +0.4");
+        assert!(by(inert).abs() < 1e-6, "inert ≈ 0");
+        assert!((by(harmful) + 0.2).abs() < 1e-6, "harmful ≈ -0.2");
     }
 }
