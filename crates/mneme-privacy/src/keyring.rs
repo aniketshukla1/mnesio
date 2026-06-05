@@ -83,6 +83,48 @@ impl Cipher for XorCipher {
     }
 }
 
+/// Real authenticated AEAD cipher (ChaCha20-Poly1305) behind the [`Cipher`]
+/// seam — the production swap-in for [`XorCipher`]. Enabled with the `aead`
+/// feature.
+///
+/// Two things change versus the keystream default, both in the safe direction:
+/// 1. **Authentication.** `decrypt` returns `None` on a tampered ciphertext,
+///    wrong key, or wrong nonce — `XorCipher` would return garbage bytes.
+/// 2. **Standard construction.** A widely-audited RustCrypto AEAD rather than
+///    a hand-rolled keystream.
+///
+/// The crypto-shred *forget* guarantee is identical either way — it comes from
+/// destroying the per-subject key in the [`Keyring`], not from the cipher.
+/// Nonce uniqueness (required for any keystream AEAD) is provided by the
+/// keyring's monotonic per-seal counter.
+#[cfg(feature = "aead")]
+#[derive(Clone, Default)]
+pub struct ChaChaCipher;
+
+#[cfg(feature = "aead")]
+impl Cipher for ChaChaCipher {
+    fn encrypt(&self, key: &[u8; 32], nonce: &[u8; 12], plaintext: &[u8]) -> Vec<u8> {
+        use chacha20poly1305::aead::{Aead, KeyInit};
+        use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+        // In-memory AEAD encryption is infallible in practice; on the
+        // theoretical error path return empty so `decrypt` fails closed
+        // (open() → None) rather than silently producing readable plaintext.
+        cipher
+            .encrypt(Nonce::from_slice(nonce), plaintext)
+            .unwrap_or_default()
+    }
+
+    fn decrypt(&self, key: &[u8; 32], nonce: &[u8; 12], ciphertext: &[u8]) -> Option<Vec<u8>> {
+        use chacha20poly1305::aead::{Aead, KeyInit};
+        use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+        // `Err` (auth failure / tamper / wrong key) → `None`. This is the
+        // tamper-resistance the keystream cipher can't provide.
+        cipher.decrypt(Nonce::from_slice(nonce), ciphertext).ok()
+    }
+}
+
 /// What gets stored in the log in place of plaintext: the subject id, the
 /// nonce, and ciphertext. Carries no key — the key lives only in the
 /// [`Keyring`]. Serializable so it can ride inside an event.
@@ -357,5 +399,76 @@ mod tests {
         );
         kr.forget("alice");
         assert_eq!(kr.open(&sealed), None, "empty content is still shredded");
+    }
+}
+
+#[cfg(all(test, feature = "aead"))]
+mod aead_tests {
+    use super::*;
+
+    #[test]
+    fn chacha_roundtrips_including_empty() {
+        let c = ChaChaCipher;
+        let key = [9u8; 32];
+        let nonce = [4u8; 12];
+        for pt in [&b""[..], &b"secret diagnosis"[..], &[0u8, 255, 1, 2][..]] {
+            let ct = c.encrypt(&key, &nonce, pt);
+            assert_ne!(&ct[..], pt, "ciphertext differs (carries the auth tag)");
+            assert_eq!(c.decrypt(&key, &nonce, &ct).as_deref(), Some(pt));
+        }
+    }
+
+    #[test]
+    fn chacha_detects_tampering() {
+        let c = ChaChaCipher;
+        let key = [1u8; 32];
+        let nonce = [2u8; 12];
+        let mut ct = c.encrypt(&key, &nonce, b"do not modify");
+        // Flip one byte → authentication must fail → None (XorCipher couldn't).
+        ct[0] ^= 0x01;
+        assert_eq!(
+            c.decrypt(&key, &nonce, &ct),
+            None,
+            "tampered ciphertext rejected"
+        );
+    }
+
+    #[test]
+    fn chacha_wrong_key_or_nonce_fails() {
+        let c = ChaChaCipher;
+        let ct = c.encrypt(&[1u8; 32], &[2u8; 12], b"payload");
+        assert_eq!(
+            c.decrypt(&[9u8; 32], &[2u8; 12], &ct),
+            None,
+            "wrong key → None"
+        );
+        assert_eq!(
+            c.decrypt(&[1u8; 32], &[7u8; 12], &ct),
+            None,
+            "wrong nonce → None"
+        );
+    }
+
+    #[test]
+    fn crypto_shred_flow_works_with_real_aead() {
+        // The whole protocol over the real cipher: seal → open → forget →
+        // unreadable. Tamper-resistance doesn't change the shred guarantee.
+        let kr = Keyring::with_cipher(ChaChaCipher);
+        let s1 = kr.seal("alice", b"diagnosis A").unwrap();
+        let s2 = kr.seal("alice", b"diagnosis B").unwrap();
+        assert_eq!(kr.open(&s1).as_deref(), Some("diagnosis A"));
+        assert_ne!(
+            s1.ciphertext, s2.ciphertext,
+            "distinct nonces → distinct ct"
+        );
+
+        assert!(kr.forget("alice"));
+        assert_eq!(
+            kr.open(&s1),
+            None,
+            "forget shreds every box for the subject"
+        );
+        assert_eq!(kr.open(&s2), None);
+        assert!(kr.seal("alice", b"new").is_none(), "forget is sticky");
     }
 }
