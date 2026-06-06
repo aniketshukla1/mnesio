@@ -1,0 +1,13 @@
+{
+  "_comment": "Hermes (Nous Research) MCP server config. Drop the `mneme` entry into your Hermes `mcp_servers` config (Hermes auto-reloads on change). Build first: `cargo build -p mneme-mcp --release`. Point MNEME_DATA at a persistent dir to keep memory across runs; share the same dir across agents to share memory. Hermes' selective tool-loading can expose a subset of the three tools.",
+  "mcp_servers": {
+    "mneme": {
+      "command": "/abs/path/to/mneme/target/release/mneme-mcp",
+      "args": [],
+      "env": {
+        "MNEME_DATA": "/var/lib/mneme",
+        "MNEME_EMBEDDER": "fastembed"
+      }
+    }
+  }
+}

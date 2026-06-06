@@ -1,0 +1,13 @@
+{
+  "_comment": "OpenClaw MCP server config. Most OpenClaw skills wrap an MCP server; this registers mneme directly. Build first: `cargo build -p mneme-mcp --release`. The key is typically `mcpServers` (check your OpenClaw version). Share MNEME_DATA across agents/users only if they should share memory; otherwise pass a per-user `tenant` on each tool call (mneme's scope boundary).",
+  "mcpServers": {
+    "mneme": {
+      "command": "/abs/path/to/mneme/target/release/mneme-mcp",
+      "args": [],
+      "env": {
+        "MNEME_DATA": "/var/lib/mneme",
+        "MNEME_EMBEDDER": "fastembed"
+      }
+    }
+  }
+}

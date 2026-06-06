@@ -303,7 +303,7 @@ npm run build && npm test     # 8 tests, no server required
 
 ## 🔌 Using mneme from Claude Desktop (MCP)
 
-The `mneme-mcp` binary speaks the [Model Context Protocol](https://modelcontextprotocol.io). Add it to your Claude Desktop config and three tools become available in any conversation:
+The `mneme-mcp` binary speaks the [Model Context Protocol](https://modelcontextprotocol.io). Add it to your Claude Desktop config and three tools become available in any conversation. **Other MCP agents** (OpenClaw, Hermes, Cursor, …) connect the same way — see **[INTEGRATION.md](INTEGRATION.md)** for paste-ready configs + the write→search→record_outcome→gated-procedural loop, and `examples/integrations/` for ready-to-edit files.
 
 - **`mneme_write_memory(content, tenant?, tags?)`** — append a new memory. Embeds synchronously so it's searchable immediately.
 - **`mneme_search(query, tenant?, k?)`** — hybrid retrieval (vector + BM25) returning a synthesized answer plus excerpts and citations.
