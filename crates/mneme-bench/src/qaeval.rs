@@ -191,8 +191,23 @@ pub async fn run_qaeval(
             .map_err(|e| anyhow!("llm judge: {e}"))?;
 
         total_latency += start.elapsed().as_secs_f64() * 1000.0;
-        if verdict_is_yes(&verdict) {
+        let scored = verdict_is_yes(&verdict);
+        if scored {
             correct += 1;
+        }
+        // Per-question audit dump (MNEME_QA_DUMP=1) — lets us see whether the
+        // judge/parser is under-crediting genuinely-correct answers vs the model
+        // actually missing. Off by default; never affects the score.
+        if std::env::var("MNEME_QA_DUMP").as_deref() == Ok("1") {
+            let trim = |s: &str, n: usize| s.replace('\n', " ").chars().take(n).collect::<String>();
+            eprintln!(
+                "DUMP scored={} | gold={:?} | ans={:?} | verdict={:?} | q={:?}",
+                if scored { "Y" } else { "N" },
+                trim(&q.answer_substring, 60),
+                trim(&candidate, 90),
+                trim(&verdict, 40),
+                trim(&q.question, 80),
+            );
         }
     }
 
