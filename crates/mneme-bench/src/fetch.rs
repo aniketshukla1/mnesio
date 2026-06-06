@@ -144,6 +144,160 @@ pub async fn fetch_suite(spec: &FetchSpec, force: bool) -> Result<MemEvalSuite> 
     Ok(suite)
 }
 
+/// LOCOMO (snap-research) — very-long-term conversational memory. Unlike the
+/// datasets-server sets, LOCOMO ships as a single JSON on GitHub: 10 multi-
+/// session dialogues, each with a `qa` set. We project every dialogue **turn**
+/// into a memory (`[date] speaker: text`) and every *answerable* QA pair into a
+/// question (gold = the answer). The ~444 adversarial (category-5) null-answer
+/// questions are excluded, so the headline is an **answerable-QA** score.
+///
+/// `cap` limits the number of QA questions (whole conversations are added until
+/// the cap is reached so memory↔question stay aligned); `cap = 0` = all
+/// answerable QA (~1,542 across the 10 dialogues). Cached to disk like the
+/// datasets-server suites.
+pub async fn fetch_locomo(cap: usize, force: bool) -> Result<MemEvalSuite> {
+    const URL: &str =
+        "https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json";
+    let tag = if cap == 0 {
+        "all".to_string()
+    } else {
+        cap.to_string()
+    };
+    let cache_path = cache_dir().join(format!("locomo10-qa{tag}.json"));
+    if !force {
+        if let Some(suite) = load_cache(&cache_path)? {
+            eprintln!(
+                "# fetch: loaded cached LOCOMO suite from {}",
+                cache_path.display()
+            );
+            return Ok(suite);
+        }
+    }
+    eprintln!("# fetch: downloading LOCOMO (snap-research/locomo) from GitHub…");
+    let raw = reqwest::get(URL)
+        .await
+        .map_err(|e| anyhow!("download locomo: {e}"))?
+        .text()
+        .await
+        .map_err(|e| anyhow!("read locomo body: {e}"))?;
+    let root: serde_json::Value = serde_json::from_str(&raw).context("parse locomo10.json")?;
+    let samples = root
+        .as_array()
+        .ok_or_else(|| anyhow!("locomo: expected a top-level array"))?;
+
+    let want = if cap == 0 { usize::MAX } else { cap };
+    let mut memories = Vec::new();
+    let mut questions = Vec::new();
+    for sample in samples {
+        if questions.len() >= want {
+            break;
+        }
+        let conv = match sample.get("conversation").and_then(|c| c.as_object()) {
+            Some(c) => c,
+            None => continue,
+        };
+        // Answerable QA only (skip null-answer adversarials).
+        let qa: Vec<&serde_json::Value> = sample
+            .get("qa")
+            .and_then(|q| q.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter(|q| q.get("answer").map(|x| !x.is_null()).unwrap_or(false))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if qa.is_empty() {
+            continue;
+        }
+        let sample_id = sample
+            .get("sample_id")
+            .and_then(|s| s.as_str())
+            .unwrap_or("locomo")
+            .to_string();
+        // Memories: every turn of every session, dated so temporal Qs are answerable.
+        for (key, val) in conv {
+            let n = match key.strip_prefix("session_") {
+                Some(rest) if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) => rest,
+                _ => continue,
+            };
+            let turns = match val.as_array() {
+                Some(t) => t,
+                None => continue,
+            };
+            let date = conv
+                .get(&format!("session_{n}_date_time"))
+                .and_then(|d| d.as_str())
+                .unwrap_or("");
+            for turn in turns {
+                let sp = turn.get("speaker").and_then(|s| s.as_str()).unwrap_or("");
+                let tx = turn.get("text").and_then(|s| s.as_str()).unwrap_or("");
+                if tx.is_empty() {
+                    continue;
+                }
+                let content = if date.is_empty() {
+                    format!("{sp}: {tx}")
+                } else {
+                    format!("[{date}] {sp}: {tx}")
+                };
+                memories.push(MemItem {
+                    content,
+                    tags: vec![sample_id.clone()],
+                });
+            }
+        }
+        // Questions.
+        for q in qa {
+            if questions.len() >= want {
+                break;
+            }
+            let question = match q.get("question").and_then(|x| x.as_str()) {
+                Some(s) => s.to_string(),
+                None => continue,
+            };
+            let gold = match q.get("answer") {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(serde_json::Value::Number(num)) => num.to_string(),
+                Some(other) => other.to_string(),
+                None => continue,
+            };
+            if gold.trim().is_empty() {
+                continue;
+            }
+            let category = match q.get("category").and_then(|c| c.as_i64()) {
+                Some(1) => "multi-hop",
+                Some(2) => "temporal",
+                Some(3) => "open-domain",
+                Some(4) => "single-hop",
+                Some(5) => "adversarial",
+                _ => "other",
+            }
+            .to_string();
+            questions.push(MemQuestion {
+                question,
+                answer_substring: gold,
+                category,
+            });
+        }
+    }
+    if questions.is_empty() {
+        bail!("locomo: no answerable questions parsed");
+    }
+    let suite = MemEvalSuite {
+        name: format!("locomo-answerable-qa{}", questions.len()),
+        description: "LOCOMO (snap-research) answerable QA over multi-session dialogue memory"
+            .to_string(),
+        memories,
+        questions,
+    };
+    if let Some(parent) = cache_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    if let Ok(json) = serde_json::to_string(&suite) {
+        let _ = std::fs::write(&cache_path, json);
+    }
+    Ok(suite)
+}
+
 fn load_cache(path: &Path) -> Result<Option<MemEvalSuite>> {
     if !path.exists() {
         return Ok(None);

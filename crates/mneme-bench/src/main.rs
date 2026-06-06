@@ -92,17 +92,34 @@ async fn cmd_qaeval(opts: QaEvalOpts) -> Result<()> {
         Some(ds) => {
             #[cfg(feature = "fetch")]
             {
-                use mneme_bench::fetch::{fetch_suite, FetchSpec};
-                let spec = match ds.as_str() {
-                    "squad" => FetchSpec::squad(opts.rows),
-                    "hotpotqa" | "hotpot" => FetchSpec::hotpotqa(opts.rows),
-                    other => bail!("unknown --dataset {other:?}; supported: squad, hotpotqa"),
-                };
-                eprintln!(
-                    "# qaeval: fetching {} real questions of {ds} from HF…",
-                    opts.rows
-                );
-                fetch_suite(&spec, false).await?
+                use mneme_bench::fetch::{fetch_locomo, fetch_suite, FetchSpec};
+                // LOCOMO ships as a single GitHub JSON (multi-session dialogue),
+                // not a datasets-server set, so it has its own loader. `--rows 0`
+                // = all answerable QA (~1,542).
+                if ds == "locomo" {
+                    eprintln!(
+                        "# qaeval: loading LOCOMO ({} answerable QA)…",
+                        if opts.rows == 0 {
+                            "all".into()
+                        } else {
+                            opts.rows.to_string()
+                        }
+                    );
+                    fetch_locomo(opts.rows, false).await?
+                } else {
+                    let spec = match ds.as_str() {
+                        "squad" => FetchSpec::squad(opts.rows),
+                        "hotpotqa" | "hotpot" => FetchSpec::hotpotqa(opts.rows),
+                        other => {
+                            bail!("unknown --dataset {other:?}; supported: squad, hotpotqa, locomo")
+                        }
+                    };
+                    eprintln!(
+                        "# qaeval: fetching {} real questions of {ds} from HF…",
+                        opts.rows
+                    );
+                    fetch_suite(&spec, false).await?
+                }
             }
             #[cfg(not(feature = "fetch"))]
             {
