@@ -56,7 +56,9 @@
 //!   (KV caching is exact), so the cartridge is a faithful — and cheaper —
 //!   substitute that skips the prefix recompute on every query. Erasure is
 //!   reconciled the same way: shred a subject's key, recompile, and the rebuilt
-//!   cache can no longer *generate* the erased fact.
+//!   cache can no longer *generate* the erased fact. [`Quant::Q8`] makes the
+//!   `quant` field of [`CartridgeKey`] real — per-row int8 shrinks the cartridge
+//!   ~4× (live: 1.18 MB → 0.30 MB) while generating the same answer.
 //!
 //! That closes the last open piece of Phase 12: the cartridge is no longer a
 //! retrieval index over a cache — it is the cache the model generates from.
@@ -85,7 +87,7 @@ pub use cartridge::{
     KvBackend, SealedMemory,
 };
 #[cfg(feature = "generative-kv")]
-pub use generative::GenerativeKvBackend;
+pub use generative::{GenerativeKvBackend, Quant};
 #[cfg(feature = "pretrained-kv")]
 pub use pretrained::PretrainedKvBackend;
 pub use store::{ActivateError, CartridgeStore};

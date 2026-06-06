@@ -24,12 +24,25 @@
 //! tokenized with the GPT-2 BPE — all behind the `generative-kv` feature so the
 //! default build stays dependency-free. Pure-Rust f32 math (no GPU/BLAS); fine
 //! for the small contexts a cartridge demo uses.
+//!
+//! ## Quantization — the real meaning of `CartridgeKey::quant`
+//!
+//! The cartridge blob is compact little-endian binary in *both* precisions, so
+//! the size win is a real property of quantization, not a serialization
+//! artifact. [`Quant::Q8`] stores the KV cache as per-row **int8** (one `i8` per
+//! element + one `f32` scale per token row) — a ~4× smaller cartridge with a
+//! small, bounded dequantization error; [`Quant::F32`] keeps it dense. `answer`
+//! auto-detects the precision from the blob's magic header and dequantizes a q8
+//! cache back to f32 before generating (the generation math is always f32). The
+//! `quant` field in [`CartridgeKey`](crate::CartridgeKey) was a bare label until
+//! now; an f32 and a q8 cartridge over the same corpus are kept apart by their
+//! distinct keys — never overwriting each other — under the same versioning
+//! rules as any other view.
 
 use crate::cartridge::{KvAnswer, KvBackend};
 use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use safetensors::{Dtype, SafeTensors};
-use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use tokenizers::Tokenizer;
 
@@ -73,24 +86,50 @@ struct Gpt2 {
 }
 
 /// Per-layer growing KV cache; `k`/`v` are `pos * N_EMBD` row-major.
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default)]
 struct LayerCache {
     k: Vec<f32>,
     v: Vec<f32>,
 }
 
-/// The serialized cartridge: the prefilled KV cache for the whole context.
-#[derive(Serialize, Deserialize)]
-struct CacheBlob {
-    prefix_len: usize,
-    layers: Vec<LayerCache>,
+/// Cartridge tensor precision — the real meaning of [`CartridgeKey::quant`].
+///
+/// [`Quant::F32`] stores the KV cache as dense `f32`; [`Quant::Q8`] stores it as
+/// per-row **int8** (one `i8` per element + one `f32` scale per token row), a
+/// ~4× smaller cartridge with a small, bounded dequantization error. The blob is
+/// compact little-endian binary in *both* cases, so the size win is a real
+/// property of the quantization — not a serialization artifact.
+///
+/// [`CartridgeKey::quant`]: crate::CartridgeKey::quant
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Quant {
+    /// Dense f32 cache (exact).
+    F32,
+    /// Per-row int8 cache (~4× smaller, lossy but bounded).
+    Q8,
 }
+
+impl Quant {
+    /// The [`CartridgeKey::quant`](crate::CartridgeKey::quant) label this maps to.
+    pub fn label(self) -> &'static str {
+        match self {
+            Quant::F32 => "f32",
+            Quant::Q8 => "q8",
+        }
+    }
+}
+
+// Blob format magics (4 bytes). The first byte of every cartridge blob selects
+// the codec, so `answer` auto-detects precision without an out-of-band flag.
+const MAGIC_F32: &[u8; 4] = b"MGF4";
+const MAGIC_Q8: &[u8; 4] = b"MGQ8";
 
 /// Generative GPT-2 KV-cartridge backend (see module docs).
 pub struct GenerativeKvBackend {
     model_id: String,
     model: Gpt2,
     tokenizer: Tokenizer,
+    quant: Quant,
 }
 
 // ---------------- tensor helpers (pure f32) ----------------
@@ -156,6 +195,131 @@ fn argmax(v: &[f32]) -> usize {
         }
     }
     best
+}
+
+// ---------------- cartridge blob codec (compact binary) ----------------
+
+fn put_u32(buf: &mut Vec<u8>, v: usize) {
+    buf.extend_from_slice(&(v as u32).to_le_bytes());
+}
+fn get_u32(buf: &[u8], off: &mut usize) -> Option<usize> {
+    let end = off.checked_add(4)?;
+    let bytes = buf.get(*off..end)?;
+    *off = end;
+    Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize)
+}
+fn put_f32(buf: &mut Vec<u8>, v: f32) {
+    buf.extend_from_slice(&v.to_le_bytes());
+}
+fn get_f32(buf: &[u8], off: &mut usize) -> Option<f32> {
+    let end = off.checked_add(4)?;
+    let bytes = buf.get(*off..end)?;
+    *off = end;
+    Some(f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+/// Per-row symmetric int8 quantization of one `rows × N_EMBD` tensor: append a
+/// `f32` scale then `N_EMBD` `i8` codes for each row. `x ≈ code * scale`.
+fn write_q8_tensor(buf: &mut Vec<u8>, t: &[f32], rows: usize) {
+    for r in 0..rows {
+        let row = &t[r * N_EMBD..(r + 1) * N_EMBD];
+        let amax = row.iter().fold(0f32, |m, &x| m.max(x.abs()));
+        let scale = if amax > 0.0 { amax / 127.0 } else { 1.0 };
+        put_f32(buf, scale);
+        let inv = 1.0 / scale;
+        for &x in row {
+            let q = (x * inv).round().clamp(-127.0, 127.0) as i8;
+            buf.push(q as u8);
+        }
+    }
+}
+
+/// Inverse of [`write_q8_tensor`]: read `rows` rows back into an f32 tensor.
+fn read_q8_tensor(buf: &[u8], off: &mut usize, rows: usize) -> Option<Vec<f32>> {
+    let mut out = vec![0f32; rows * N_EMBD];
+    for r in 0..rows {
+        let scale = get_f32(buf, off)?;
+        let end = off.checked_add(N_EMBD)?;
+        let codes = buf.get(*off..end)?;
+        *off = end;
+        for (c, slot) in codes
+            .iter()
+            .zip(out[r * N_EMBD..(r + 1) * N_EMBD].iter_mut())
+        {
+            *slot = (*c as i8) as f32 * scale;
+        }
+    }
+    Some(out)
+}
+
+/// Serialize a prefilled cache to the cartridge blob under the given precision.
+fn encode_blob(prefix_len: usize, layers: &[LayerCache], quant: Quant) -> Vec<u8> {
+    let mut buf = Vec::new();
+    match quant {
+        Quant::F32 => {
+            buf.extend_from_slice(MAGIC_F32);
+            put_u32(&mut buf, prefix_len);
+            put_u32(&mut buf, layers.len());
+            for l in layers {
+                let rows = l.k.len() / N_EMBD;
+                put_u32(&mut buf, rows);
+                for &x in &l.k {
+                    put_f32(&mut buf, x);
+                }
+                for &x in &l.v {
+                    put_f32(&mut buf, x);
+                }
+            }
+        }
+        Quant::Q8 => {
+            buf.extend_from_slice(MAGIC_Q8);
+            put_u32(&mut buf, prefix_len);
+            put_u32(&mut buf, layers.len());
+            for l in layers {
+                let rows = l.k.len() / N_EMBD;
+                put_u32(&mut buf, rows);
+                write_q8_tensor(&mut buf, &l.k, rows);
+                write_q8_tensor(&mut buf, &l.v, rows);
+            }
+        }
+    }
+    buf
+}
+
+/// Decode a cartridge blob (any precision) back to an f32 cache for generation.
+/// Q8 is dequantized here; the generation math is always f32.
+fn decode_blob(blob: &[u8]) -> Option<(usize, Vec<LayerCache>)> {
+    let magic = blob.get(0..4)?;
+    let q8 = match magic {
+        m if m == MAGIC_F32 => false,
+        m if m == MAGIC_Q8 => true,
+        _ => return None,
+    };
+    let mut off = 4usize;
+    let prefix_len = get_u32(blob, &mut off)?;
+    let n_layers = get_u32(blob, &mut off)?;
+    let mut layers = Vec::with_capacity(n_layers);
+    for _ in 0..n_layers {
+        let rows = get_u32(blob, &mut off)?;
+        let (k, v) = if q8 {
+            let k = read_q8_tensor(blob, &mut off, rows)?;
+            let v = read_q8_tensor(blob, &mut off, rows)?;
+            (k, v)
+        } else {
+            let n = rows * N_EMBD;
+            let mut k = vec![0f32; n];
+            for slot in k.iter_mut() {
+                *slot = get_f32(blob, &mut off)?;
+            }
+            let mut v = vec![0f32; n];
+            for slot in v.iter_mut() {
+                *slot = get_f32(blob, &mut off)?;
+            }
+            (k, v)
+        };
+        layers.push(LayerCache { k, v });
+    }
+    Some((prefix_len, layers))
 }
 
 impl Gpt2 {
@@ -345,7 +509,22 @@ impl GenerativeKvBackend {
                 n_pos,
             },
             tokenizer,
+            quant: Quant::F32,
         })
+    }
+
+    /// Set the cartridge precision. The `model_id` is unchanged — precision is a
+    /// separate [`CartridgeKey::quant`](crate::CartridgeKey::quant) dimension, so
+    /// an f32 and a q8 cartridge over the same corpus get distinct keys and are
+    /// kept apart rather than overwriting each other.
+    pub fn with_quant(mut self, quant: Quant) -> Self {
+        self.quant = quant;
+        self
+    }
+
+    /// The precision this backend compiles cartridges at.
+    pub fn quant(&self) -> Quant {
+        self.quant
     }
 
     fn encode(&self, text: &str, cap: usize) -> Vec<u32> {
@@ -385,18 +564,14 @@ impl KvBackend for GenerativeKvBackend {
     async fn compile_blob(&self, contents: &[String]) -> Vec<u8> {
         let ctx = self.context_ids(contents);
         let layers = self.model.prefill(&ctx);
-        serde_json::to_vec(&CacheBlob {
-            prefix_len: ctx.len(),
-            layers,
-        })
-        .unwrap_or_default()
+        encode_blob(ctx.len(), &layers, self.quant)
     }
 
     async fn answer(&self, blob: &[u8], query: &str) -> KvAnswer {
         let start = Instant::now();
-        let parsed: CacheBlob = match serde_json::from_slice(blob) {
-            Ok(b) => b,
-            Err(_) => {
+        let (prefix_len, mut cache) = match decode_blob(blob) {
+            Some(parsed) => parsed,
+            None => {
                 return KvAnswer {
                     text: String::new(),
                     latency_us: start.elapsed().as_micros() as u64,
@@ -404,7 +579,6 @@ impl KvBackend for GenerativeKvBackend {
                 }
             }
         };
-        let mut cache = parsed.layers;
         let q = self.encode(query, MAX_CTX);
         if cache.len() != N_LAYER || q.is_empty() {
             return KvAnswer {
@@ -413,11 +587,10 @@ impl KvBackend for GenerativeKvBackend {
                 answered: false,
             };
         }
-        // Generate continuing from the restored prefix cache — the cartridge
-        // drives generation; we do NOT re-encode the context here.
-        let gen = self
-            .model
-            .generate(&mut cache, &q, parsed.prefix_len, MAX_NEW);
+        // Generate continuing from the restored prefix cache (dequantized to f32
+        // if the blob was q8) — the cartridge drives generation; we do NOT
+        // re-encode the context here.
+        let gen = self.model.generate(&mut cache, &q, prefix_len, MAX_NEW);
         let text = self.decode(&gen);
         KvAnswer {
             latency_us: start.elapsed().as_micros() as u64,
@@ -483,5 +656,104 @@ mod tests {
         // (almost surely) different generations; the erased one can't surface it.
         assert!(!b.text.contains("Nimbus"), "erased fact must not appear");
         eprintln!("with fact: {:?}\nwithout:  {:?}", a.text, b.text);
+    }
+
+    // ---- q8 quantization (codec test needs no weights/network) ----
+
+    /// The q8 codec is a real ~4× size win with bounded error — provable without
+    /// loading GPT-2. Builds a synthetic multi-layer cache, encodes it at both
+    /// precisions, and checks (a) the q8 blob is ~4× smaller and (b) decode(q8)
+    /// reconstructs the f32 cache within the quantization step.
+    #[test]
+    fn q8_codec_is_4x_smaller_with_bounded_error() {
+        // 3 layers × 6 token rows of deterministic-but-varied f32 values.
+        let rows = 6usize;
+        let mk = |salt: f32| -> LayerCache {
+            let mut k = vec![0f32; rows * N_EMBD];
+            let mut v = vec![0f32; rows * N_EMBD];
+            for (i, slot) in k.iter_mut().enumerate() {
+                *slot = ((i as f32 * 0.013 + salt).sin()) * 2.0;
+            }
+            for (i, slot) in v.iter_mut().enumerate() {
+                *slot = ((i as f32 * 0.017 + salt).cos()) * 0.5;
+            }
+            LayerCache { k, v }
+        };
+        let layers = vec![mk(0.1), mk(0.2), mk(0.3)];
+
+        let f32_blob = encode_blob(rows, &layers, Quant::F32);
+        let q8_blob = encode_blob(rows, &layers, Quant::Q8);
+
+        // Size: q8 is ~4× smaller (1 byte/elem + tiny per-row scale overhead vs
+        // 4 bytes/elem). Assert a clear >3× win, honest because both are binary.
+        assert!(
+            (q8_blob.len() as f64) < (f32_blob.len() as f64) / 3.0,
+            "q8 must be >3x smaller: f32={} q8={}",
+            f32_blob.len(),
+            q8_blob.len()
+        );
+
+        // Round-trip: f32 is exact, q8 is within one quant step of the original.
+        let (pf, lf) = decode_blob(&f32_blob).expect("f32 decodes");
+        let (pq, lq) = decode_blob(&q8_blob).expect("q8 decodes");
+        assert_eq!(pf, rows);
+        assert_eq!(pq, rows);
+        for (orig, deq) in layers.iter().zip(&lf) {
+            assert_eq!(orig.k, deq.k, "f32 round-trip is exact");
+            assert_eq!(orig.v, deq.v);
+        }
+        let mut max_err = 0f32;
+        for (orig, deq) in layers.iter().zip(&lq) {
+            for (a, b) in orig.k.iter().zip(&deq.k) {
+                max_err = max_err.max((a - b).abs());
+            }
+        }
+        // Per-row scale ≤ amax/127; the worst dequant error is ≤ half a step,
+        // comfortably under 0.05 for these magnitudes.
+        assert!(max_err < 0.05, "q8 dequant error too large: {max_err}");
+    }
+
+    /// A q8 cartridge generates a correct answer at ~4× smaller blob — the real
+    /// `quant` win on the actual GPT-2 cache.
+    #[tokio::test]
+    #[ignore = "downloads GPT-2 weights (~548MB) + runs a real forward"]
+    async fn q8_cartridge_is_smaller_and_still_answers() {
+        let f32_be = GenerativeKvBackend::load().expect("load gpt2");
+        let q8_be = GenerativeKvBackend::load()
+            .expect("load gpt2")
+            .with_quant(Quant::Q8);
+        assert_eq!(q8_be.quant().label(), "q8");
+
+        let ctx = vec![
+            "Paris is the capital of France.".to_string(),
+            "Berlin is the capital of Germany.".to_string(),
+        ];
+        let query = "The capital of France is";
+
+        let f32_blob = f32_be.compile_blob(&ctx).await;
+        let q8_blob = q8_be.compile_blob(&ctx).await;
+        assert!(
+            (q8_blob.len() as f64) < (f32_blob.len() as f64) / 3.0,
+            "q8 cartridge must be >3x smaller: f32={} q8={}",
+            f32_blob.len(),
+            q8_blob.len()
+        );
+
+        // The q8 cartridge still answers the factual query correctly despite the
+        // lossy cache.
+        let ans = q8_be.answer(&q8_blob, query).await;
+        assert!(ans.answered);
+        assert!(
+            ans.text.contains("Paris"),
+            "q8 cartridge should still answer 'Paris', got {:?}",
+            ans.text
+        );
+        eprintln!(
+            "f32 blob = {} bytes, q8 blob = {} bytes ({:.1}x smaller); q8 answer = {:?}",
+            f32_blob.len(),
+            q8_blob.len(),
+            f32_blob.len() as f64 / q8_blob.len() as f64,
+            ans.text
+        );
     }
 }

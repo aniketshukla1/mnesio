@@ -75,7 +75,7 @@ Twelve crates, each with a focused responsibility. External dependencies sit beh
 | `mneme-procedural` | GEPA-style procedural compiler + gate + eval suite + learning curve | ✅ Phase 2 |
 | `mneme-causal` | Counterfactual contribution scoring + GC by measurement (leave-one-out ablation over the replayable log) | ✅ Phase 10 |
 | `mneme-probe` | Self-falsifying memory — acceptance probes + belief calibration; a refuted claim invalidates-and-supersedes itself (history kept) | ✅ Phase 11 |
-| `mneme-kv` | Gated KV cartridges — KV cache as a versioned, gated, erasable view of the log (real-tensor backend + **real GPT-2 pretrained weights**; **full 12-layer generative use** via `generative-kv` — the cartridge *is* the cache the model generates from) | ◑ Phase 12 |
+| `mneme-kv` | Gated KV cartridges — KV cache as a versioned, gated, erasable view of the log (real-tensor backend + **real GPT-2 pretrained weights**; **full 12-layer generative use** via `generative-kv` — the cartridge *is* the cache the model generates from; **real q8 quantization** → 4.0× smaller cartridge, same answer) | ◑ Phase 12 |
 | `mneme-exchange` | Certified skill exchange — export a gated artifact as a signed certificate; the importer re-runs its own gate before activation | ✅ Phase 13 |
 | `mneme-dream` | Negative memory + dreaming — gated suppression rules from bad outcomes; bounded offline prune-by-contribution + re-anchor drifted notes | ✅ Phase 14 |
 | `mneme-provenance` | Regulator-grade provenance — time-travel reconstruction + provenance chains + verifiable erasure over the append-only log | ✅ Phase 15 |
@@ -599,7 +599,7 @@ hybrid-retrieve path. Run the full LOCOMO/LongMemEval splits through `qaeval`
 
 - **Phase 10** ✅ Causal memory — counterfactual contribution scoring + GC by measurement (`mneme-causal`)
 - **Phase 11** ✅ Self-falsifying memory — acceptance probes + belief calibration; a refuted claim auto-supersedes (`mneme-probe`)
-- **Phase 12** ◑ Gated KV cartridges — KV cache as a versioned, gated, erasable view of the log. Substrate + a real-tensor attention backend (`TensorKvBackend`) + a **real pretrained-weights backend** (`PretrainedKvBackend`, feature `pretrained-kv`: loads GPT-2's real embeddings + layer-0 `c_attn` Q/K/V) + a **full 12-layer generative backend** (`GenerativeKvBackend`, feature `generative-kv`) all done. In the generative backend the cartridge *is* GPT-2's key/value cache: `compile_blob` prefills the full forward over the context, `answer` restores that cache and **generates** the continuation attending over it. Proven by a self-consistency oracle — generation from the cartridge is **token-identical** to processing the full prompt from scratch (KV caching is exact) — so the cartridge is a faithful, cheaper substitute, and a post-shred recompile can no longer generate the erased fact. The one remaining open-weights lift is a GPU/quantized backend behind the same `KvBackend` trait (`mneme-kv`)
+- **Phase 12** ◑ Gated KV cartridges — KV cache as a versioned, gated, erasable view of the log. Substrate + a real-tensor attention backend (`TensorKvBackend`) + a **real pretrained-weights backend** (`PretrainedKvBackend`, feature `pretrained-kv`: loads GPT-2's real embeddings + layer-0 `c_attn` Q/K/V) + a **full 12-layer generative backend** (`GenerativeKvBackend`, feature `generative-kv`) all done. In the generative backend the cartridge *is* GPT-2's key/value cache: `compile_blob` prefills the full forward over the context, `answer` restores that cache and **generates** the continuation attending over it. Proven by a self-consistency oracle — generation from the cartridge is **token-identical** to processing the full prompt from scratch (KV caching is exact) — so the cartridge is a faithful, cheaper substitute, and a post-shred recompile can no longer generate the erased fact. **Quantization is real, too**: the cartridge blob is compact binary in both precisions, and `Quant::Q8` (per-row int8 + f32 scales) makes the cartridge **4.0× smaller** (1,179,708 → 296,508 bytes on the live GPT-2 cache) while generating the *same* answer — closing the `quant` dimension of `CartridgeKey`, which was a bare label before. The remaining open-weights lift is a GPU-accelerated backend for a larger model behind the same `KvBackend` trait (`mneme-kv`)
 - **Phase 13** ✅ Certified skill exchange — signed certificate; importer re-runs its own gate before activation (`mneme-exchange`)
 - **Phase 14** ✅ Negative memory + dreaming — gated suppression rules + bounded offline prune-by-contribution & re-anchor (`mneme-dream`)
 - **Phase 15** ✅ Regulator-grade provenance — time-travel reconstruction + provenance chains + verifiable erasure (`mneme-provenance`)
@@ -618,7 +618,7 @@ mneme-evolve      :  27 tests
 mneme-procedural  : 112 tests
 mneme-causal      :  18 tests
 mneme-probe       :  14 tests
-mneme-kv          :  15 tests (+1 `#[ignore]` under --features pretrained-kv; +2 `#[ignore]` under --features generative-kv: real GPT-2 12-layer forward)
+mneme-kv          :  15 tests (+1 `#[ignore]` under --features pretrained-kv; +1 q8 codec + 3 `#[ignore]` under --features generative-kv: real GPT-2 12-layer forward + q8 cartridge)
 mneme-exchange    :  11 tests (+4 under --features ed25519: real signatures)
 mneme-dream       :  10 tests
 mneme-provenance  :   8 tests
