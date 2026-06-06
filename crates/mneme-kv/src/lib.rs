@@ -85,6 +85,8 @@
 //!   write.
 //! - **#7 (swappable seam):** the tensor backend is a trait.
 
+#[cfg(feature = "candle-kv")]
+mod candle;
 mod cartridge;
 #[cfg(feature = "generative-kv")]
 mod generative;
@@ -95,6 +97,8 @@ mod qwen;
 mod store;
 mod tensor;
 
+#[cfg(feature = "candle-kv")]
+pub use candle::QwenCandleBackend;
 pub use cartridge::{
     compile, Cartridge, CartridgeKey, CartridgeStatus, CompileError, FakeKvBackend, KvAnswer,
     KvBackend, SealedMemory,
