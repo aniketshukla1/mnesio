@@ -502,6 +502,10 @@ empty), while still honoring valid explicit-operator queries like
 
 ## ⚖️ How mneme compares
 
+> 📊 **[BENCHMARKS.md](BENCHMARKS.md)** consolidates all the measured numbers in one
+> place — substrate at 105k memories, real-data recall, live LLM-judged QA, and
+> the GPU KV-cartridge speedups — with methodology + caveats.
+
 ```bash
 cargo run -p mneme-bench -- compete --k 10 --embedder fastembed
 ```
