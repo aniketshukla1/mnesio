@@ -9,7 +9,17 @@
 //! The model dimensions are read from the repo's `config.json`, so the *same*
 //! code loads Qwen2.5 **0.5B / 1.5B / 3B / 7B / …** — "use a bigger model" is a
 //! repo string, not a rewrite. Precision is selectable: [`Precision::F32`]
-//! (exact) or [`Precision::F16`] (half — smaller weights, faster Metal kernels).
+//! (exact), [`Precision::F16`] (half, but narrow exponent), or
+//! [`Precision::BF16`] (half, **f32's exponent range**).
+//!
+//! **Deep models need bf16, not f16.** Qwen ships bf16 and its activations use
+//! that wide exponent range. In f16 (5-bit exponent, max ≈ 65504) a deep model's
+//! values overflow to inf and generation collapses to garbage — the 0.5B happens
+//! to stay in range, the 1.5B/28-layer does not. [`Precision::BF16`] keeps half
+//! the memory of f32 *with* f32's range, so the 1.5B answers correctly (verified
+//! live). Independently, the forward runs **mixed precision** as good hygiene:
+//! weights + KV cache in the chosen dtype, but the residual stream / RMSNorm /
+//! softmax / logits accumulate in **f32** (see [`QwenCandleBackend::forward`]).
 //!
 //! ## What it proves
 //!
@@ -45,8 +55,15 @@ const MAGIC: &[u8; 4] = b"CWK5";
 pub enum Precision {
     /// Full f32 (exact, larger, the correctness baseline).
     F32,
-    /// Half f16 (smaller weights, faster Metal kernels, small bounded error).
+    /// Half f16 (5-bit exponent). Smallest, but its narrow exponent range
+    /// (max ≈ 65504) overflows in *deep* Qwen models → use [`Precision::BF16`]
+    /// for those. Fine for the 0.5B.
     F16,
+    /// Brain-float bf16 (8-bit exponent — **f32's range**, 7-bit mantissa). The
+    /// model's *native* dtype on disk, so it's the right half precision: half the
+    /// memory of f32 with no exponent overflow, so even deep models (1.5B+) stay
+    /// stable. Requires a bf16-capable device (Apple M-series Metal, CUDA).
+    BF16,
 }
 
 impl Precision {
@@ -54,6 +71,7 @@ impl Precision {
         match self {
             Precision::F32 => DType::F32,
             Precision::F16 => DType::F16,
+            Precision::BF16 => DType::BF16,
         }
     }
     /// The [`CartridgeKey::quant`](crate::CartridgeKey::quant) label this maps to.
@@ -61,6 +79,7 @@ impl Precision {
         match self {
             Precision::F32 => "f32",
             Precision::F16 => "f16",
+            Precision::BF16 => "bf16",
         }
     }
 }
@@ -180,6 +199,25 @@ pub struct QwenCandleBackend {
     cos: Tensor, // [MAX_POS, head_dim/2]
     sin: Tensor,
     tokenizer: Tokenizer,
+}
+
+/// Cast to `dt`, returning a cheap clone when already that dtype (so the f32
+/// path pays nothing for the mixed-precision casts).
+fn cast(t: &Tensor, dt: DType) -> Result<Tensor> {
+    if t.dtype() == dt {
+        Ok(t.clone())
+    } else {
+        Ok(t.to_dtype(dt)?)
+    }
+}
+
+/// RMSNorm computed in **f32** regardless of the weight dtype: upcast the input
+/// and (tiny `[hid]`) weight to f32, normalize, return f32. Stability for the
+/// residual stream in mixed precision.
+fn rms_norm_f32(x: &Tensor, weight: &Tensor, eps: f32) -> Result<Tensor> {
+    let x = cast(&x.contiguous()?, DType::F32)?;
+    let w = cast(weight, DType::F32)?;
+    Ok(candle_nn::ops::rms_norm(&x, &w, eps)?)
 }
 
 /// `y = x · Wᵀ (+ b)` for `x [seq, in]`, `w [out, in]` → `[seq, out]`.
@@ -314,12 +352,12 @@ impl QwenCandleBackend {
         device_label(&self.device)
     }
 
-    /// The active precision label (`f32` / `f16`).
+    /// The active precision label (`f32` / `f16` / `bf16`).
     pub fn precision_label(&self) -> &'static str {
-        if self.dtype == DType::F16 {
-            "f16"
-        } else {
-            "f32"
+        match self.dtype {
+            DType::F16 => "f16",
+            DType::BF16 => "bf16",
+            _ => "f32",
         }
     }
 
@@ -330,6 +368,15 @@ impl QwenCandleBackend {
     /// Forward `ids` at absolute positions `start_pos..start_pos+seq`, growing
     /// each layer's KV cache and attending causally over it. Returns the last
     /// token's logits `[vocab]`.
+    ///
+    /// **Mixed precision**: weights, KV cache, and matmuls run in the model dtype
+    /// (`wd` — f16/bf16 save memory), but the **residual stream, RMSNorm,
+    /// softmax, and final logits accumulate in f32** for numerical robustness.
+    /// When `wd == f32` every cast is a cheap clone, so the f32 path is
+    /// unchanged. (Note: the *deep-model* fix is choosing bf16 over f16 — f32
+    /// accumulation alone doesn't rescue f16, because individual f16 *values*
+    /// overflow its narrow exponent range; bf16 has f32's range. See the module
+    /// docs.)
     fn forward(
         &self,
         ids: &[u32],
@@ -338,20 +385,25 @@ impl QwenCandleBackend {
     ) -> Result<Tensor> {
         let cfg = &self.cfg;
         let (q_dim, head_dim, n_head, n_kv) = (cfg.q_dim(), cfg.head_dim, cfg.n_head, cfg.n_kv);
+        let wd = self.dtype; // weight / cache / matmul dtype
+        let acc = DType::F32; // accumulation (residual / norm / softmax) dtype
+        let eps = cfg.eps as f32;
         let seq = ids.len();
         let id_t = Tensor::from_vec(ids.to_vec(), (seq,), &self.device)?;
-        let mut h = self.embed.index_select(&id_t, 0)?; // [seq, hid]
+        // Residual stream lives in f32.
+        let mut h = cast(&self.embed.index_select(&id_t, 0)?, acc)?; // [seq, hid]
 
         let cos = self.cos.narrow(0, start_pos, seq)?;
         let sin = self.sin.narrow(0, start_pos, seq)?;
         let scale = (head_dim as f64).sqrt();
 
         for (li, blk) in self.blocks.iter().enumerate() {
-            // --- attention ---
-            let normed = candle_nn::ops::rms_norm(&h.contiguous()?, &blk.ln1, cfg.eps as f32)?;
-            let q = linear(&normed, &blk.q_w, Some(&blk.q_b))?;
-            let k = linear(&normed, &blk.k_w, Some(&blk.k_b))?;
-            let v = linear(&normed, &blk.v_w, Some(&blk.v_b))?;
+            // --- attention --- RMSNorm in f32, then downcast for the matmuls.
+            let normed = rms_norm_f32(&h, &blk.ln1, eps)?;
+            let nd = cast(&normed, wd)?;
+            let q = linear(&nd, &blk.q_w, Some(&blk.q_b))?;
+            let k = linear(&nd, &blk.k_w, Some(&blk.k_b))?;
+            let v = linear(&nd, &blk.v_w, Some(&blk.v_b))?;
 
             let q = q
                 .reshape((seq, n_head, head_dim))?
@@ -381,33 +433,34 @@ impl QwenCandleBackend {
 
             let k_rep = repeat_kv(&k_all, cfg.group())?;
             let v_rep = repeat_kv(&v_all, cfg.group())?;
-            // scores [n_head, seq, total]; softmax in f32 for numerical safety.
+            // scores [n_head, seq, total]; mask + softmax in f32 for safety.
             let scores = (q.matmul(&k_rep.transpose(1, 2)?.contiguous()?)? / scale)?;
-            let mask = self.causal_mask(seq, total, start_pos)?;
-            let scores = scores.broadcast_add(&mask)?.to_dtype(DType::F32)?;
-            let probs = candle_nn::ops::softmax_last_dim(&scores)?.to_dtype(self.dtype)?;
+            let mask = self.causal_mask(seq, total, start_pos)?; // f32
+            let scores = cast(&scores, acc)?.broadcast_add(&mask)?;
+            let probs = cast(&candle_nn::ops::softmax_last_dim(&scores)?, wd)?;
             let ctx = probs.matmul(&v_rep)?; // [n_head, seq, head_dim]
             let ctx = ctx.transpose(0, 1)?.reshape((seq, q_dim))?;
-            let o = linear(&ctx, &blk.o_w, None)?;
-            h = (h + o)?;
+            let o = cast(&linear(&ctx, &blk.o_w, None)?, acc)?;
+            h = (h + o)?; // residual add in f32
 
-            // --- MLP (SwiGLU) ---
-            let normed2 = candle_nn::ops::rms_norm(&h.contiguous()?, &blk.ln2, cfg.eps as f32)?;
-            let gate = candle_nn::ops::silu(&linear(&normed2, &blk.gate_w, None)?)?;
-            let up = linear(&normed2, &blk.up_w, None)?;
+            // --- MLP (SwiGLU) --- RMSNorm f32, matmuls wd, residual f32.
+            let normed2 = rms_norm_f32(&h, &blk.ln2, eps)?;
+            let nd2 = cast(&normed2, wd)?;
+            let gate = candle_nn::ops::silu(&linear(&nd2, &blk.gate_w, None)?)?;
+            let up = linear(&nd2, &blk.up_w, None)?;
             let act = (gate * up)?;
-            let down = linear(&act, &blk.down_w, None)?;
-            h = (h + down)?;
+            let down = cast(&linear(&act, &blk.down_w, None)?, acc)?;
+            h = (h + down)?; // residual add in f32
         }
 
-        let h = candle_nn::ops::rms_norm(&h.contiguous()?, &self.norm, cfg.eps as f32)?;
-        let last = h.i(seq - 1)?;
+        let h = rms_norm_f32(&h, &self.norm, eps)?; // f32
+        let last = cast(&h.i(seq - 1)?, wd)?; // downcast for the tied lm_head matmul
         let logits = last.unsqueeze(0)?.matmul(&self.embed.t()?)?.squeeze(0)?;
-        Ok(logits.to_dtype(DType::F32)?)
+        cast(&logits, acc)
     }
 
-    /// Additive causal mask `[seq, total]` in the compute dtype: 0 where
-    /// attendable, -inf otherwise.
+    /// Additive causal mask `[seq, total]` in **f32**: 0 where attendable, -inf
+    /// otherwise (added to the f32 scores before softmax).
     fn causal_mask(&self, seq: usize, total: usize, start_pos: usize) -> Result<Tensor> {
         let mut m = vec![0f32; seq * total];
         for i in 0..seq {
@@ -418,7 +471,7 @@ impl QwenCandleBackend {
                 }
             }
         }
-        Ok(Tensor::from_vec(m, (seq, total), &self.device)?.to_dtype(self.dtype)?)
+        Ok(Tensor::from_vec(m, (seq, total), &self.device)?)
     }
 
     fn prefill(&self, ids: &[u32]) -> Result<Vec<Option<LayerCache>>> {
@@ -768,17 +821,16 @@ mod tests {
     }
 
     /// A *larger* model (Qwen2.5-1.5B, 28 layers) loads + answers via the same
-    /// config-driven path. Runs at **f32**: f16 is validated on the 0.5B model,
-    /// but the deeper 1.5B residual stream is numerically unstable in half
-    /// precision (a mixed-precision residual is future work), so larger models
-    /// use f32 today.
+    /// config-driven path, **at bf16** — half precision with f32's exponent
+    /// range (the model's native dtype), which keeps the deep model stable where
+    /// f16 overflowed into garbage.
     #[tokio::test]
     #[ignore = "downloads Qwen2.5-1.5B (~3GB) + runs a real forward"]
     async fn candle_larger_model_loads_and_answers() {
         let be = QwenCandleBackend::load_repo(
             "Qwen/Qwen2.5-1.5B-Instruct",
             best_device(),
-            Precision::F32,
+            Precision::BF16,
         )
         .expect("load qwen 1.5b");
         eprintln!(
