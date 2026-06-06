@@ -156,6 +156,12 @@ better and can take it back."
 1. **Protocol loop (deterministic, CI):** `agent_session_over_stdio` — spawns
    `mneme-mcp` and drives initialize → tools/list → writes → search (asserts
    recall) → record_outcome. No real agent needed.
+1b. **Real LLM agent loop (live):** `python3 examples/agent_loop_eval.py` — a
+   real Ollama model **decides its own tool calls** against the real `mneme-mcp`
+   server and answers questions about private facts it can't otherwise know.
+   Measured: **0% → 83%** with mneme (llama3.2). This is the closest proxy to a
+   real OpenClaw/Hermes session that runs without their full stack, and it
+   exercises the exact MCP transport they use.
 2. **Real-agent smoke (your environment):** drop the config above into OpenClaw
    / Hermes, run a task, watch the tool calls and the dashboard
    (`mneme-server` → `/dashboard`).

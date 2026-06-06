@@ -31,6 +31,7 @@ hand-waved.
 | Retrieval recall@10 @105k | **100%** (exact-gold needles, mock embedder) | deterministic synthetic corpus |
 | Retrieval recall@10, real data | **98.1% SQuAD**, 99.2% @5k synthetic (fastembed) | real semantic embedder |
 | End-to-end QA (LLM-judged) | **100% LOCOMO-mini, 100% LongMemEval-mini** | llama3.2 3B (local Ollama); curated mini-suites |
+| **Real LLM agent loop** | **0% → 83%** with mneme (private facts) | llama3.2 decides its own tool calls over real MCP; see §5.1 |
 | GPU KV cartridge (0.5B) | **107× warm prefill vs CPU** (same f32) | Apple M1 Pro, Metal |
 | GPU KV cartridge (1.5B) | **~1577× prefill** (Metal bf16 3.34 ms vs CPU f32 5.27 s) | stacks GPU + bf16; see §6 |
 | KV cartridge quantization | **q8 = 4.0× smaller**, same answer | 1.18 MB → 0.30 MB |
@@ -120,6 +121,34 @@ correctness end-to-end**, not just retrieval.
 | Zep | LOCOMO | LLM-as-Judge | 65.99% | same |
 | A-Mem | LOCOMO | LLM-as-Judge | 48.38% | same |
 | Zep (gpt-4o) | LongMemEval | QA accuracy | 71.20% | Zep [arXiv:2501.13956](https://arxiv.org/abs/2501.13956), Tbl 2 |
+
+### 5.1 Real LLM agent loop — does memory make a *real agent* better?
+
+The most honest end-to-end test: a real LLM agent that **decides its own tool
+calls**, talking to the **real `mneme-mcp` server over stdio** (the same
+transport OpenClaw/Hermes use), answering questions about **private facts the
+base model cannot know** (synthetic codenames, regions, dates seeded into mneme).
+
+```bash
+# needs Ollama running + `cargo build -p mneme-mcp --release`
+python3 examples/agent_loop_eval.py
+```
+
+Measured live (llama3.2 via Ollama, 6 private-fact questions, ~54 s):
+
+| Condition | Correct | Accuracy |
+|---|---:|---:|
+| **without memory** | 0 / 6 | **0%** |
+| **with mneme** (agent calls `mneme_search`) | 5 / 6 | **83%** |
+| **memory lift** | | **+83 pp** |
+
+Without memory the model correctly answers "I don't know" to every private fact;
+with mneme it searches, recovers the fact, and answers. The one miss was a
+small-model artifact (llama3.2-3B emitted a malformed tool-call as plain text on
+one question, so no search ran) — not a memory failure; every time the model
+actually called the tool, mneme returned the fact and the answer was correct.
+This is the wedge made concrete: **a real agent goes from 0% to 83% purely
+because of the memory layer**, with the model — not a script — driving the tools.
 
 ---
 
