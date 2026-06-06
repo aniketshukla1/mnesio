@@ -28,6 +28,11 @@ pretrained-kv = ["dep:safetensors", "dep:tokenizers", "dep:hf-hub", "dep:anyhow"
 # literally *is* the cache). Heavier than `pretrained-kv` (all 12 layers + a
 # generation loop); same optional deps.
 generative-kv = ["dep:safetensors", "dep:tokenizers", "dep:hf-hub", "dep:anyhow"]
+# A modern open-weights model (Qwen2.5-0.5B-Instruct) behind the same cartridge
+# path: RMSNorm + RoPE + grouped-query attention + SwiGLU, bf16 weights. The
+# honest "more advanced model than GPT-2" answer — pure-Rust forward so the
+# cartridge owns the KV cache (Ollama's API can't expose it); same optional deps.
+qwen-kv = ["dep:safetensors", "dep:tokenizers", "dep:hf-hub", "dep:anyhow"]
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -60,6 +60,17 @@
 //!   `quant` field of [`CartridgeKey`] real — per-row int8 shrinks the cartridge
 //!   ~4× (live: 1.18 MB → 0.30 MB) while generating the same answer.
 //!
+//! - [`QwenKvBackend`] *(feature `qwen-kv`)* — the same cartridge path on a
+//!   **2024 architecture**, the honest answer to "why GPT-2, can't we use a more
+//!   advanced model?". Loads **Qwen2.5-0.5B-Instruct** (RMSNorm, RoPE,
+//!   grouped-query attention, SwiGLU, bf16, 24 layers, instruction-tuned) and
+//!   hand-rolls its forward in pure Rust so the cartridge owns the KV cache —
+//!   which **Ollama's black-box API cannot expose**, the reason the cartridge
+//!   can't be built on a remote text endpoint. Live: the cartridge answers
+//!   "capital of France" → "Paris", token-identical to the full prompt (the
+//!   RoPE/GQA cache is exact), and a shred-recompile drops the fact from
+//!   generation. candle + Metal would be a GPU speed-swap behind this same seam.
+//!
 //! That closes the last open piece of Phase 12: the cartridge is no longer a
 //! retrieval index over a cache — it is the cache the model generates from.
 //!
@@ -79,6 +90,8 @@ mod cartridge;
 mod generative;
 #[cfg(feature = "pretrained-kv")]
 mod pretrained;
+#[cfg(feature = "qwen-kv")]
+mod qwen;
 mod store;
 mod tensor;
 
@@ -90,5 +103,7 @@ pub use cartridge::{
 pub use generative::{GenerativeKvBackend, Quant};
 #[cfg(feature = "pretrained-kv")]
 pub use pretrained::PretrainedKvBackend;
+#[cfg(feature = "qwen-kv")]
+pub use qwen::QwenKvBackend;
 pub use store::{ActivateError, CartridgeStore};
 pub use tensor::{TensorConfig, TensorKvBackend};
