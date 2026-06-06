@@ -1394,6 +1394,10 @@
       }
       var ok = g.kv_correct && g.shred_succeeded;
       var color = ok ? "#3fb950" : "#f85149";
+      var hasCpu = g.prefill_cpu_us > 0;
+      var prefillLine = hasCpu
+        ? 'prefill: GPU <b>' + g.prefill_gpu_us + ' µs</b> vs CPU <b>' + g.prefill_cpu_us + ' µs</b> (identical code, warm)'
+        : 'prefill: GPU <b>' + g.prefill_gpu_us + ' µs</b> (CPU baseline skipped — set MNEME_KV_GPU_CPU=1)';
       el.innerHTML = head
         + '<div style="display:flex;gap:14px;flex-wrap:wrap;">'
         + kpi("device", g.device, "#58a6ff")
@@ -1404,7 +1408,7 @@
         + '</div>'
         + '<div style="background:#0c0e14;border:1px solid #232836;border-left:3px solid ' + color + ';border-radius:9px;padding:12px 14px;margin-top:12px;">'
         + '<div style="font-size:12px;color:#c8cfdc;">generated from cartridge: <b>' + (g.kv_answer || "—") + '</b>' + (g.kv_correct ? " ✓correct" : " ✗") + '</div>'
-        + '<div style="font-size:12px;color:#c8cfdc;margin-top:6px;">prefill: GPU <b>' + g.prefill_gpu_us + ' µs</b> vs CPU <b>' + g.prefill_cpu_us + ' µs</b> (identical code, warm)</div>'
+        + '<div style="font-size:12px;color:#c8cfdc;margin-top:6px;">' + prefillLine + '</div>'
         + '<div style="font-size:12px;color:#c8cfdc;margin-top:6px;">erasure-by-recompile: codename answerable <b>' + g.answerable_before_shred + '</b> → <b>' + g.answerable_after_shred + '</b>' + (g.shred_succeeded ? " ✓" : " ✗") + '</div>'
         + '</div>';
     }

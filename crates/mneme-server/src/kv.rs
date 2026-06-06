@@ -344,12 +344,20 @@ impl GpuKvReport {
 }
 
 /// Real GPU KV-cartridge demo, behind `--features candle-kv` + `MNEME_KV_GPU=1`.
-/// Loading a ~1GB model + a CPU baseline is heavy, so it's opt-in and the result
-/// is computed once and cached for the process lifetime.
+/// Loading a model + a CPU baseline is heavy, so it's opt-in and the result is
+/// computed once and cached for the process lifetime.
+///
+/// Configurable via env:
+/// - `MNEME_KV_GPU_MODEL` — HF repo (default `Qwen/Qwen2.5-0.5B-Instruct`); any
+///   Qwen2-family size loads (e.g. `Qwen/Qwen2.5-1.5B-Instruct`).
+/// - `MNEME_KV_GPU_PRECISION` — `f32` | `f16` | `bf16` (default `f32`). Deep
+///   models need `bf16`, not `f16` (f16's narrow exponent overflows).
+/// - `MNEME_KV_GPU_CPU` — `0` skips the CPU baseline (the speedup is omitted);
+///   useful for large models where a CPU prefill would be very slow.
 #[cfg(feature = "candle-kv")]
 mod gpu {
     use super::GpuKvReport;
-    use mneme_kv::{KvBackend, QwenCandleBackend};
+    use mneme_kv::{CandlePrecision, KvBackend, QwenCandleBackend, CANDLE_DEFAULT_REPO};
     use tokio::sync::OnceCell;
 
     static CELL: OnceCell<GpuKvReport> = OnceCell::const_new();
@@ -357,11 +365,25 @@ mod gpu {
     const KV_QUERY: &str = "\nQuestion: What is the capital of France?\nAnswer:";
     const ERASE_QUERY: &str = "\nQuestion: What is the project's codename?\nAnswer:";
 
+    fn model_repo() -> String {
+        std::env::var("MNEME_KV_GPU_MODEL").unwrap_or_else(|_| CANDLE_DEFAULT_REPO.to_string())
+    }
+    fn precision() -> CandlePrecision {
+        std::env::var("MNEME_KV_GPU_PRECISION")
+            .ok()
+            .and_then(|s| CandlePrecision::from_label(&s))
+            .unwrap_or(CandlePrecision::F32)
+    }
+    fn cpu_baseline_enabled() -> bool {
+        std::env::var("MNEME_KV_GPU_CPU").ok().as_deref() != Some("0")
+    }
+
     pub async fn summary() -> Option<GpuKvReport> {
         if std::env::var("MNEME_KV_GPU").ok().as_deref() != Some("1") {
             return Some(GpuKvReport::disabled(
-                "set MNEME_KV_GPU=1 to load the real GPU KV backend (downloads ~1GB \
-                 Qwen2.5-0.5B on first run, then caches)"
+                "set MNEME_KV_GPU=1 to load the real GPU KV backend (downloads the model on \
+                 first run, then caches). Pick model/precision with MNEME_KV_GPU_MODEL + \
+                 MNEME_KV_GPU_PRECISION (f32|f16|bf16)"
                     .to_string(),
             ));
         }
@@ -369,9 +391,13 @@ mod gpu {
     }
 
     async fn compute() -> GpuKvReport {
-        let gpu = match QwenCandleBackend::load() {
+        let repo = model_repo();
+        let prec = precision();
+        let gpu = match QwenCandleBackend::load_best(&repo, prec) {
             Ok(b) => b,
-            Err(e) => return GpuKvReport::disabled(format!("load failed: {e}")),
+            Err(e) => {
+                return GpuKvReport::disabled(format!("load {repo} ({}) failed: {e}", prec.label()))
+            }
         };
 
         // (1) Cartridge answer on a held-out factual query.
@@ -383,7 +409,8 @@ mod gpu {
         let ans = gpu.answer(&blob, KV_QUERY).await;
         let kv_correct = ans.answered && ans.text.contains("Paris");
 
-        // (2) Warm GPU vs CPU prefill on identical code.
+        // (2) Warm GPU vs CPU prefill on identical code + model + precision. The
+        // CPU baseline can be slow for large models, so it's skippable.
         let big: Vec<String> = (0..8)
             .map(|i| format!("Fact {i}: the quick brown fox jumps over the lazy dog."))
             .collect();
@@ -392,11 +419,15 @@ mod gpu {
             .time_prefill(&big)
             .map(|d| d.as_micros() as u64)
             .unwrap_or(0);
-        let prefill_cpu_us = QwenCandleBackend::load_cpu()
-            .and_then(|cpu| cpu.time_prefill(&big))
-            .map(|d| d.as_micros() as u64)
-            .unwrap_or(0);
-        let speedup = if prefill_gpu_us > 0 {
+        let prefill_cpu_us = if cpu_baseline_enabled() {
+            QwenCandleBackend::load_cpu_repo(&repo, prec)
+                .and_then(|cpu| cpu.time_prefill(&big))
+                .map(|d| d.as_micros() as u64)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let speedup = if prefill_gpu_us > 0 && prefill_cpu_us > 0 {
             prefill_cpu_us as f64 / prefill_gpu_us as f64
         } else {
             0.0

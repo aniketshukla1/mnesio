@@ -82,6 +82,17 @@ impl Precision {
             Precision::BF16 => "bf16",
         }
     }
+
+    /// Parse a precision label (`f32` / `f16` / `bf16`, case-insensitive).
+    /// `None` for anything else, so callers can fall back to a default.
+    pub fn from_label(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "f32" | "fp32" | "float32" => Some(Precision::F32),
+            "f16" | "fp16" | "float16" | "half" => Some(Precision::F16),
+            "bf16" | "bfloat16" => Some(Precision::BF16),
+            _ => None,
+        }
+    }
 }
 
 /// Architecture dimensions read from a Qwen2 `config.json`.
@@ -256,6 +267,19 @@ impl QwenCandleBackend {
     /// the GPU-vs-CPU comparison, without the caller needing a `candle` `Device`.
     pub fn load_cpu() -> Result<Self> {
         Self::load_repo(DEFAULT_REPO, Device::Cpu, Precision::F32)
+    }
+
+    /// Load `repo` at `precision` onto the **best** device — the GPU-side
+    /// constructor for callers (e.g. the server) that don't have a `candle`
+    /// `Device` in scope.
+    pub fn load_best(repo: &str, precision: Precision) -> Result<Self> {
+        Self::load_repo(repo, best_device(), precision)
+    }
+
+    /// Load `repo` at `precision` forced onto the **CPU** — the matched baseline
+    /// for a fair GPU-vs-CPU comparison on the same model + precision.
+    pub fn load_cpu_repo(repo: &str, precision: Precision) -> Result<Self> {
+        Self::load_repo(repo, Device::Cpu, precision)
     }
 
     /// Load any Qwen2-family `repo` at the given precision onto `device`. The
