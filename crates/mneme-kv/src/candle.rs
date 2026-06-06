@@ -878,4 +878,39 @@ mod tests {
         );
         eprintln!("qwen 1.5b answer: {:?}", ans.text);
     }
+
+    /// Real GPU-vs-CPU prefill speedup for the **1.5B**, the way you'd actually
+    /// deploy it: **GPU bf16 vs CPU f32**. candle's CPU backend has no bf16
+    /// matmul kernel, so f32 *is* the CPU baseline — and bf16 is the right GPU
+    /// precision for a deep model (f16 overflows). Same model + identical code on
+    /// `Device::new_metal` vs `Device::Cpu`; both warmed before timing. The
+    /// precisions differ by necessity, so the number is labeled as such (not a
+    /// same-precision microbenchmark — the 0.5B test covers f32-vs-f32). Captured
+    /// for the README.
+    #[tokio::test]
+    #[ignore = "loads Qwen2.5-1.5B on GPU(bf16)+CPU(f32) (~9GB) + a slow CPU prefill"]
+    async fn candle_larger_model_gpu_vs_cpu_speedup() {
+        let repo = "Qwen/Qwen2.5-1.5B-Instruct";
+        let gpu =
+            QwenCandleBackend::load_repo(repo, best_device(), Precision::BF16).expect("gpu 1.5b");
+        let cpu =
+            QwenCandleBackend::load_repo(repo, Device::Cpu, Precision::F32).expect("cpu 1.5b");
+        let big: Vec<String> = (0..8)
+            .map(|i| format!("Fact {i}: the quick brown fox jumps over the lazy dog."))
+            .collect();
+        // Warm both (Metal shader compile / first-call costs) before timing.
+        let _ = gpu.time_prefill(&big);
+        let _ = cpu.time_prefill(&big);
+        let g = gpu.time_prefill(&big).expect("gpu prefill");
+        let c = cpu.time_prefill(&big).expect("cpu prefill");
+        let ratio = c.as_secs_f64() / g.as_secs_f64().max(1e-9);
+        eprintln!(
+            "1.5B prefill — {} bf16: {:?}, cpu f32: {:?} ({:.1}x)",
+            gpu.device_label(),
+            g,
+            c,
+            ratio
+        );
+        assert!(g < c, "GPU prefill should beat CPU: gpu={g:?} cpu={c:?}");
+    }
 }
