@@ -85,12 +85,42 @@ fn build_qa_llm(choice: &str) -> Result<Arc<dyn LlmClient>> {
 async fn cmd_qaeval(opts: QaEvalOpts) -> Result<()> {
     use mneme_bench::qaeval::run_qaeval;
 
-    let json = match opts.suite.as_str() {
-        "locomo" => LOCOMO_JSON,
-        "longmemeval" => LONGMEMEVAL_JSON,
-        other => bail!("unknown --suite {other:?}; expected `locomo` or `longmemeval`"),
+    // A real fetched dataset (squad/hotpotqa) takes precedence over the embedded
+    // mini-suite when `--dataset` is given — that's the "headline" path: hundreds
+    // of real questions through retrieve → LLM answer → LLM judge.
+    let suite = match &opts.dataset {
+        Some(ds) => {
+            #[cfg(feature = "fetch")]
+            {
+                use mneme_bench::fetch::{fetch_suite, FetchSpec};
+                let spec = match ds.as_str() {
+                    "squad" => FetchSpec::squad(opts.rows),
+                    "hotpotqa" | "hotpot" => FetchSpec::hotpotqa(opts.rows),
+                    other => bail!("unknown --dataset {other:?}; supported: squad, hotpotqa"),
+                };
+                eprintln!(
+                    "# qaeval: fetching {} real questions of {ds} from HF…",
+                    opts.rows
+                );
+                fetch_suite(&spec, false).await?
+            }
+            #[cfg(not(feature = "fetch"))]
+            {
+                let _ = ds;
+                bail!("--dataset needs `--features fetch` (HTTP dataset loader)");
+            }
+        }
+        None => {
+            let json = match opts.suite.as_str() {
+                "locomo" => LOCOMO_JSON,
+                "longmemeval" => LONGMEMEVAL_JSON,
+                other => {
+                    bail!("unknown --suite {other:?}; expected `locomo` or `longmemeval`")
+                }
+            };
+            load_memeval_suite(json)?
+        }
     };
-    let suite = load_memeval_suite(json)?;
     let llm = build_qa_llm(&opts.llm)?;
 
     eprintln!(
@@ -841,6 +871,10 @@ struct QaEvalOpts {
     embedder: String,
     /// `demo` (deterministic stand-in) or `ollama` (real, needs the feature).
     llm: String,
+    /// When set (`squad` / `hotpotqa`), QA runs over a *fetched real* dataset of
+    /// `rows` questions instead of the embedded mini-suite. Needs `--features fetch`.
+    dataset: Option<String>,
+    rows: usize,
 }
 
 #[cfg(feature = "fetch")]
@@ -1112,6 +1146,8 @@ fn parse_qaeval(mut iter: std::iter::Peekable<impl Iterator<Item = String>>) -> 
         k: 10,
         embedder: "mock".into(),
         llm: "demo".into(),
+        dataset: None,
+        rows: 100,
     };
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -1119,6 +1155,8 @@ fn parse_qaeval(mut iter: std::iter::Peekable<impl Iterator<Item = String>>) -> 
             "--k" => opts.k = next_value(&mut iter, "--k")?.parse()?,
             "--embedder" => opts.embedder = next_value(&mut iter, "--embedder")?,
             "--llm" => opts.llm = next_value(&mut iter, "--llm")?,
+            "--dataset" => opts.dataset = Some(next_value(&mut iter, "--dataset")?),
+            "--rows" => opts.rows = next_value(&mut iter, "--rows")?.parse()?,
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -1286,6 +1324,8 @@ fn print_help() {
          \n\
          QAEVAL OPTIONS:\n\
          \x20\x20--suite          locomo | longmemeval             (default: locomo)\n\
+         \x20\x20--dataset        squad | hotpotqa  (real data; needs --features fetch)\n\
+         \x20\x20--rows           rows to fetch when --dataset set (default: 100)\n\
          \x20\x20--k              top-k retrieved as context       (default: 10)\n\
          \x20\x20--embedder       mock | fastembed                 (default: mock)\n\
          \x20\x20--llm            demo | ollama                    (default: demo)\n\

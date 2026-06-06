@@ -30,7 +30,7 @@ hand-waved.
 | Query latency @105k | **p50 3.60 ms, p99 4.90 ms** | HNSW, sub-linear growth |
 | Retrieval recall@10 @105k | **100%** (exact-gold needles, mock embedder) | deterministic synthetic corpus |
 | Retrieval recall@10, real data | **98.1% SQuAD**, 99.2% @5k synthetic (fastembed) | real semantic embedder |
-| End-to-end QA (LLM-judged) | **100% LOCOMO-mini, 100% LongMemEval-mini** | llama3.2 3B (local Ollama); curated mini-suites |
+| End-to-end QA (LLM-judged) | **66% SQuAD-100** (real); 100% LOCOMO/LongMemEval-mini | llama3.2 3B (local Ollama); SQuAD-100 is the honest headline |
 | **Real LLM agent loop** | **0% → 83%** with mneme (private facts) | llama3.2 decides its own tool calls over real MCP; see §5.1 |
 | GPU KV cartridge (0.5B) | **107× warm prefill vs CPU** (same f32) | Apple M1 Pro, Metal |
 | GPU KV cartridge (1.5B) | **~1577× prefill** (Metal bf16 3.34 ms vs CPU f32 5.27 s) | stacks GPU + bf16; see §6 |
@@ -103,14 +103,28 @@ With a real semantic embedder the write path still stays fast (append p50
 cargo run -p mneme-bench --release --features ollama -- qaeval --suite locomo
 ```
 
-| Suite | Embedder | Judge / Answerer | QA accuracy | ms/q |
-|---|---|---|---:|---:|
-| LOCOMO-mini | fastembed | llama3.2 3B (Ollama, local) | **100% (10/10)** | 1,765 |
-| LongMemEval-mini | fastembed | llama3.2 3B (Ollama, local) | **100% (10/10)** | 1,377 |
+| Suite | n | Embedder | Judge / Answerer | QA accuracy | ms/q |
+|---|---:|---|---|---:|---:|
+| **SQuAD (real, fetched)** | **100** | fastembed | llama3.2 3B (Ollama, local) | **66.0% (66/100)** | 1,973 |
+| LOCOMO-mini | 10 | fastembed | llama3.2 3B (Ollama, local) | 100% (10/10) | 1,765 |
+| LongMemEval-mini | 10 | fastembed | llama3.2 3B (Ollama, local) | 100% (10/10) | 1,377 |
 
-These are *curated mini-suites*, so 100% is a small-n result — run the full
-splits for a headline number. They prove the **harness measures answer
-correctness end-to-end**, not just retrieval.
+The **SQuAD-100** row is the honest *headline* end-to-end number: 100 real
+questions pulled live from Hugging Face through the full
+retrieve → LLM-answer → LLM-judge pipeline. 66% reflects a small local 3B model
+(not a frontier API) — the harness is the deliverable; swap in a stronger
+answerer to raise the ceiling. Reproduce:
+
+```bash
+cargo run -p mneme-bench --release --features fetch,ollama -- \
+  qaeval --dataset squad --rows 100 --embedder fastembed --llm ollama
+```
+
+The LOCOMO/LongMemEval rows are *curated mini-suites* (n=10) — 100% is small-n,
+shown to prove the harness measures answer correctness end-to-end. A **full**
+LOCOMO/LongMemEval number would need adding those datasets' loaders (their
+multi-session-dialogue shape differs from the SQuAD/HotpotQA QA shape the
+`fetch` loader handles today) — tracked as future work, not faked here.
 
 ### Cited competitor QA numbers (different metric/setup — landscape only)
 
