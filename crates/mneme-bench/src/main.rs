@@ -85,6 +85,62 @@ fn build_qa_llm(choice: &str) -> Result<Arc<dyn LlmClient>> {
 async fn cmd_qaeval(opts: QaEvalOpts) -> Result<()> {
     use mneme_bench::qaeval::run_qaeval;
 
+    // Canonical LOCOMO: one scoped corpus per dialogue (no cross-conversation
+    // distractors), aggregated. This is the fair, standard protocol.
+    #[cfg(feature = "fetch")]
+    if opts.dataset.as_deref() == Some("locomo") && opts.per_conversation {
+        let suites = mneme_bench::fetch::fetch_locomo_conversations(opts.rows, false).await?;
+        let llm = build_qa_llm(&opts.llm)?;
+        eprintln!(
+            "# mneme-bench qaeval · LOCOMO per-conversation (canonical) · {} dialogues · k={} · embedder={} · llm={}",
+            suites.len(),
+            opts.k,
+            opts.embedder,
+            opts.llm
+        );
+        let (mut correct, mut total, mut lat_sum) = (0usize, 0usize, 0f64);
+        for (i, s) in suites.iter().enumerate() {
+            let r = run_qaeval(s, opts.k, &opts.embedder, llm.as_ref(), &opts.llm).await?;
+            eprintln!(
+                "#   [{:>2}/{}] {:<26} {:>3}/{:<3} = {:.1}%",
+                i + 1,
+                suites.len(),
+                s.name,
+                r.correct,
+                r.total,
+                r.accuracy() * 100.0
+            );
+            correct += r.correct;
+            total += r.total;
+            lat_sum += r.mean_latency_ms * r.total as f64;
+        }
+        let acc = if total > 0 {
+            correct as f64 / total as f64
+        } else {
+            0.0
+        };
+        eprintln!("# summary (LOCOMO per-conversation, canonical):");
+        eprintln!("#   dialogues:   {}", suites.len());
+        eprintln!(
+            "#   QA accuracy: {:.1}% ({}/{})",
+            acc * 100.0,
+            correct,
+            total
+        );
+        eprintln!(
+            "#   mean latency: {:.1} ms/question",
+            if total > 0 {
+                lat_sum / total as f64
+            } else {
+                0.0
+            }
+        );
+        if opts.llm == "demo" {
+            eprintln!("# NOTE: `demo` LLM is a stand-in — use --llm ollama for a real score.");
+        }
+        return Ok(());
+    }
+
     // A real fetched dataset (squad/hotpotqa) takes precedence over the embedded
     // mini-suite when `--dataset` is given — that's the "headline" path: hundreds
     // of real questions through retrieve → LLM answer → LLM judge.
@@ -888,10 +944,14 @@ struct QaEvalOpts {
     embedder: String,
     /// `demo` (deterministic stand-in) or `ollama` (real, needs the feature).
     llm: String,
-    /// When set (`squad` / `hotpotqa`), QA runs over a *fetched real* dataset of
-    /// `rows` questions instead of the embedded mini-suite. Needs `--features fetch`.
+    /// When set (`squad` / `hotpotqa` / `locomo`), QA runs over a *fetched real*
+    /// dataset of `rows` questions instead of the embedded mini-suite. Needs
+    /// `--features fetch`.
     dataset: Option<String>,
     rows: usize,
+    /// LOCOMO only: run the **canonical per-conversation** protocol (memory
+    /// scoped to each dialogue) instead of one global corpus over all dialogues.
+    per_conversation: bool,
 }
 
 #[cfg(feature = "fetch")]
@@ -1165,6 +1225,7 @@ fn parse_qaeval(mut iter: std::iter::Peekable<impl Iterator<Item = String>>) -> 
         llm: "demo".into(),
         dataset: None,
         rows: 100,
+        per_conversation: false,
     };
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -1174,6 +1235,7 @@ fn parse_qaeval(mut iter: std::iter::Peekable<impl Iterator<Item = String>>) -> 
             "--llm" => opts.llm = next_value(&mut iter, "--llm")?,
             "--dataset" => opts.dataset = Some(next_value(&mut iter, "--dataset")?),
             "--rows" => opts.rows = next_value(&mut iter, "--rows")?.parse()?,
+            "--per-conversation" => opts.per_conversation = true,
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -1341,8 +1403,9 @@ fn print_help() {
          \n\
          QAEVAL OPTIONS:\n\
          \x20\x20--suite          locomo | longmemeval             (default: locomo)\n\
-         \x20\x20--dataset        squad | hotpotqa  (real data; needs --features fetch)\n\
-         \x20\x20--rows           rows to fetch when --dataset set (default: 100)\n\
+         \x20\x20--dataset        squad | hotpotqa | locomo (real data; needs --features fetch)\n\
+         \x20\x20--rows           rows to fetch when --dataset set (default: 100; 0=all for locomo)\n\
+         \x20\x20--per-conversation  LOCOMO: canonical per-dialogue scoping (fair protocol)\n\
          \x20\x20--k              top-k retrieved as context       (default: 10)\n\
          \x20\x20--embedder       mock | fastembed                 (default: mock)\n\
          \x20\x20--llm            demo | ollama                    (default: demo)\n\

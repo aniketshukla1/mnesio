@@ -144,20 +144,108 @@ pub async fn fetch_suite(spec: &FetchSpec, force: bool) -> Result<MemEvalSuite> 
     Ok(suite)
 }
 
-/// LOCOMO (snap-research) — very-long-term conversational memory. Unlike the
-/// datasets-server sets, LOCOMO ships as a single JSON on GitHub: 10 multi-
-/// session dialogues, each with a `qa` set. We project every dialogue **turn**
-/// into a memory (`[date] speaker: text`) and every *answerable* QA pair into a
-/// question (gold = the answer). The ~444 adversarial (category-5) null-answer
-/// questions are excluded, so the headline is an **answerable-QA** score.
-///
-/// `cap` limits the number of QA questions (whole conversations are added until
-/// the cap is reached so memory↔question stay aligned); `cap = 0` = all
-/// answerable QA (~1,542 across the 10 dialogues). Cached to disk like the
-/// datasets-server suites.
+const LOCOMO_URL: &str =
+    "https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json";
+
+/// Download + parse the raw `locomo10.json` into its top-level array of samples.
+async fn download_locomo() -> Result<Vec<serde_json::Value>> {
+    eprintln!("# fetch: downloading LOCOMO (snap-research/locomo) from GitHub…");
+    let raw = reqwest::get(LOCOMO_URL)
+        .await
+        .map_err(|e| anyhow!("download locomo: {e}"))?
+        .text()
+        .await
+        .map_err(|e| anyhow!("read locomo body: {e}"))?;
+    let root: serde_json::Value = serde_json::from_str(&raw).context("parse locomo10.json")?;
+    root.as_array()
+        .cloned()
+        .ok_or_else(|| anyhow!("locomo: expected a top-level array"))
+}
+
+/// Every dialogue turn of a LOCOMO sample as dated memories
+/// (`[date] speaker: text`), so temporal questions are answerable from memory.
+fn locomo_memories(sample: &serde_json::Value) -> Vec<MemItem> {
+    let mut memories = Vec::new();
+    let Some(conv) = sample.get("conversation").and_then(|c| c.as_object()) else {
+        return memories;
+    };
+    let sample_id = sample
+        .get("sample_id")
+        .and_then(|s| s.as_str())
+        .unwrap_or("locomo")
+        .to_string();
+    for (key, val) in conv {
+        let n = match key.strip_prefix("session_") {
+            Some(rest) if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) => rest,
+            _ => continue,
+        };
+        let Some(turns) = val.as_array() else {
+            continue;
+        };
+        let date = conv
+            .get(&format!("session_{n}_date_time"))
+            .and_then(|d| d.as_str())
+            .unwrap_or("");
+        for turn in turns {
+            let sp = turn.get("speaker").and_then(|s| s.as_str()).unwrap_or("");
+            let tx = turn.get("text").and_then(|s| s.as_str()).unwrap_or("");
+            if tx.is_empty() {
+                continue;
+            }
+            let content = if date.is_empty() {
+                format!("{sp}: {tx}")
+            } else {
+                format!("[{date}] {sp}: {tx}")
+            };
+            memories.push(MemItem {
+                content,
+                tags: vec![sample_id.clone()],
+            });
+        }
+    }
+    memories
+}
+
+/// The *answerable* QA pairs of a LOCOMO sample (null-answer adversarials, the
+/// category-5 set, are excluded).
+fn locomo_answerable_questions(sample: &serde_json::Value) -> Vec<MemQuestion> {
+    let mut out = Vec::new();
+    let Some(qa) = sample.get("qa").and_then(|q| q.as_array()) else {
+        return out;
+    };
+    for q in qa {
+        let gold = match q.get("answer") {
+            Some(serde_json::Value::String(s)) if !s.trim().is_empty() => s.clone(),
+            Some(serde_json::Value::Number(num)) => num.to_string(),
+            _ => continue, // null answer (adversarial) or empty → skip
+        };
+        let Some(question) = q.get("question").and_then(|x| x.as_str()) else {
+            continue;
+        };
+        let category = match q.get("category").and_then(|c| c.as_i64()) {
+            Some(1) => "multi-hop",
+            Some(2) => "temporal",
+            Some(3) => "open-domain",
+            Some(4) => "single-hop",
+            Some(5) => "adversarial",
+            _ => "other",
+        }
+        .to_string();
+        out.push(MemQuestion {
+            question: question.to_string(),
+            answer_substring: gold,
+            category,
+        });
+    }
+    out
+}
+
+/// LOCOMO (snap-research) as **one global suite** — all 10 dialogues' turns in a
+/// single memory corpus, all answerable QA as questions. This is the *harder*
+/// (non-canonical) setting: cross-conversation distractors. `cap = 0` = all
+/// answerable QA (~1,542). For the canonical, fair setting use
+/// [`fetch_locomo_conversations`].
 pub async fn fetch_locomo(cap: usize, force: bool) -> Result<MemEvalSuite> {
-    const URL: &str =
-        "https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json";
     let tag = if cap == 0 {
         "all".to_string()
     } else {
@@ -173,110 +261,24 @@ pub async fn fetch_locomo(cap: usize, force: bool) -> Result<MemEvalSuite> {
             return Ok(suite);
         }
     }
-    eprintln!("# fetch: downloading LOCOMO (snap-research/locomo) from GitHub…");
-    let raw = reqwest::get(URL)
-        .await
-        .map_err(|e| anyhow!("download locomo: {e}"))?
-        .text()
-        .await
-        .map_err(|e| anyhow!("read locomo body: {e}"))?;
-    let root: serde_json::Value = serde_json::from_str(&raw).context("parse locomo10.json")?;
-    let samples = root
-        .as_array()
-        .ok_or_else(|| anyhow!("locomo: expected a top-level array"))?;
-
+    let samples = download_locomo().await?;
     let want = if cap == 0 { usize::MAX } else { cap };
     let mut memories = Vec::new();
     let mut questions = Vec::new();
-    for sample in samples {
+    for sample in &samples {
         if questions.len() >= want {
             break;
         }
-        let conv = match sample.get("conversation").and_then(|c| c.as_object()) {
-            Some(c) => c,
-            None => continue,
-        };
-        // Answerable QA only (skip null-answer adversarials).
-        let qa: Vec<&serde_json::Value> = sample
-            .get("qa")
-            .and_then(|q| q.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter(|q| q.get("answer").map(|x| !x.is_null()).unwrap_or(false))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let qa = locomo_answerable_questions(sample);
         if qa.is_empty() {
             continue;
         }
-        let sample_id = sample
-            .get("sample_id")
-            .and_then(|s| s.as_str())
-            .unwrap_or("locomo")
-            .to_string();
-        // Memories: every turn of every session, dated so temporal Qs are answerable.
-        for (key, val) in conv {
-            let n = match key.strip_prefix("session_") {
-                Some(rest) if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) => rest,
-                _ => continue,
-            };
-            let turns = match val.as_array() {
-                Some(t) => t,
-                None => continue,
-            };
-            let date = conv
-                .get(&format!("session_{n}_date_time"))
-                .and_then(|d| d.as_str())
-                .unwrap_or("");
-            for turn in turns {
-                let sp = turn.get("speaker").and_then(|s| s.as_str()).unwrap_or("");
-                let tx = turn.get("text").and_then(|s| s.as_str()).unwrap_or("");
-                if tx.is_empty() {
-                    continue;
-                }
-                let content = if date.is_empty() {
-                    format!("{sp}: {tx}")
-                } else {
-                    format!("[{date}] {sp}: {tx}")
-                };
-                memories.push(MemItem {
-                    content,
-                    tags: vec![sample_id.clone()],
-                });
-            }
-        }
-        // Questions.
+        memories.extend(locomo_memories(sample));
         for q in qa {
             if questions.len() >= want {
                 break;
             }
-            let question = match q.get("question").and_then(|x| x.as_str()) {
-                Some(s) => s.to_string(),
-                None => continue,
-            };
-            let gold = match q.get("answer") {
-                Some(serde_json::Value::String(s)) => s.clone(),
-                Some(serde_json::Value::Number(num)) => num.to_string(),
-                Some(other) => other.to_string(),
-                None => continue,
-            };
-            if gold.trim().is_empty() {
-                continue;
-            }
-            let category = match q.get("category").and_then(|c| c.as_i64()) {
-                Some(1) => "multi-hop",
-                Some(2) => "temporal",
-                Some(3) => "open-domain",
-                Some(4) => "single-hop",
-                Some(5) => "adversarial",
-                _ => "other",
-            }
-            .to_string();
-            questions.push(MemQuestion {
-                question,
-                answer_substring: gold,
-                category,
-            });
+            questions.push(q);
         }
     }
     if questions.is_empty() {
@@ -284,7 +286,7 @@ pub async fn fetch_locomo(cap: usize, force: bool) -> Result<MemEvalSuite> {
     }
     let suite = MemEvalSuite {
         name: format!("locomo-answerable-qa{}", questions.len()),
-        description: "LOCOMO (snap-research) answerable QA over multi-session dialogue memory"
+        description: "LOCOMO (snap-research) answerable QA — global corpus over all 10 dialogues"
             .to_string(),
         memories,
         questions,
@@ -296,6 +298,68 @@ pub async fn fetch_locomo(cap: usize, force: bool) -> Result<MemEvalSuite> {
         let _ = std::fs::write(&cache_path, json);
     }
     Ok(suite)
+}
+
+/// LOCOMO **per conversation** — the *canonical* protocol: one suite per dialogue
+/// whose memory is only that dialogue's turns (no cross-conversation
+/// distractors). Returns one [`MemEvalSuite`] per conversation; the caller runs
+/// each and aggregates. `cap = 0` = all answerable QA across the 10 dialogues.
+pub async fn fetch_locomo_conversations(cap: usize, force: bool) -> Result<Vec<MemEvalSuite>> {
+    let tag = if cap == 0 {
+        "all".to_string()
+    } else {
+        cap.to_string()
+    };
+    let cache_path = cache_dir().join(format!("locomo10-perconv-qa{tag}.json"));
+    if !force && cache_path.exists() {
+        if let Ok(json) = std::fs::read_to_string(&cache_path) {
+            if let Ok(v) = serde_json::from_str::<Vec<MemEvalSuite>>(&json) {
+                eprintln!(
+                    "# fetch: loaded cached per-conversation LOCOMO from {}",
+                    cache_path.display()
+                );
+                return Ok(v);
+            }
+        }
+    }
+    let samples = download_locomo().await?;
+    let want = if cap == 0 { usize::MAX } else { cap };
+    let mut taken = 0usize;
+    let mut suites = Vec::new();
+    for sample in &samples {
+        if taken >= want {
+            break;
+        }
+        let mut qa = locomo_answerable_questions(sample);
+        if qa.is_empty() {
+            continue;
+        }
+        if taken + qa.len() > want {
+            qa.truncate(want - taken);
+        }
+        taken += qa.len();
+        let sample_id = sample
+            .get("sample_id")
+            .and_then(|s| s.as_str())
+            .unwrap_or("locomo")
+            .to_string();
+        suites.push(MemEvalSuite {
+            name: format!("locomo-{sample_id}-qa{}", qa.len()),
+            description: "LOCOMO per-conversation (canonical) answerable QA".to_string(),
+            memories: locomo_memories(sample),
+            questions: qa,
+        });
+    }
+    if suites.is_empty() {
+        bail!("locomo: no answerable questions parsed");
+    }
+    if let Some(parent) = cache_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    if let Ok(json) = serde_json::to_string(&suites) {
+        let _ = std::fs::write(&cache_path, json);
+    }
+    Ok(suites)
 }
 
 fn load_cache(path: &Path) -> Result<Option<MemEvalSuite>> {
