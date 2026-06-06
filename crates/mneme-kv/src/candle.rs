@@ -1,25 +1,28 @@
 //! **GPU-accelerated** KV cartridge (feature `candle-kv`) — the same cartridge
-//! semantics as [`crate::QwenKvBackend`] (Qwen2.5-0.5B-Instruct) but with the
-//! forward run on-device via [`candle_core`], so prefill is batched on the GPU
-//! (Apple Metal with `--features metal`, CPU otherwise) instead of the pure-Rust
-//! token-by-token loop.
+//! semantics as [`crate::QwenKvBackend`] but with the forward run on-device via
+//! [`candle_core`], so prefill is batched on the GPU (Apple Metal with
+//! `--features metal`, CPU otherwise) instead of the pure-Rust token-by-token
+//! loop.
 //!
-//! ## Why this exists / what it proves
+//! ## Config-driven (any Qwen2-family size) + selectable precision
 //!
-//! It's the GPU answer to "use a more advanced model, faster". The pure-Rust
-//! `qwen-kv` backend is the **semantic oracle**: both must answer the same
-//! factual query ("capital of France" → "Paris"). We do *not* assert
+//! The model dimensions are read from the repo's `config.json`, so the *same*
+//! code loads Qwen2.5 **0.5B / 1.5B / 3B / 7B / …** — "use a bigger model" is a
+//! repo string, not a rewrite. Precision is selectable: [`Precision::F32`]
+//! (exact) or [`Precision::F16`] (half — smaller weights, faster Metal kernels).
+//!
+//! ## What it proves
+//!
+//! The pure-Rust `qwen-kv` backend is the **semantic oracle**: both must answer
+//! the same factual query ("capital of France" → "Paris"). We do *not* assert
 //! bit-identical tokens *across* backends — GPU and scalar-CPU f32 round
-//! differently — but we *do* assert candle's **own** self-consistency
-//! (cartridge generation == full-prompt generation, same device, same rounding),
-//! which is the exact cartridge-correctness claim.
-//!
-//! The cartridge still owns the per-layer K/V cache ([`candle_core`]'s built-in
-//! models keep theirs private), so the versioning / gate / crypto-shred
-//! reconciliations are unchanged — this is a speed swap behind the
-//! [`KvBackend`](crate::KvBackend) seam, not a redesign. The same code runs on
-//! `Device::Cpu` or `Device::new_metal`, so the GPU-vs-CPU prefill latency is a
-//! like-for-like measurement.
+//! differently — but we *do* assert candle's **own** self-consistency (cartridge
+//! generation == full-prompt generation, same device + dtype), the exact
+//! cartridge-correctness claim. The cartridge still owns the per-layer K/V cache
+//! ([`candle_core`]'s built-in models keep theirs private), so versioning / gate
+//! / crypto-shred are unchanged — a speed swap behind the
+//! [`KvBackend`](crate::KvBackend) seam. The same code runs on `Device::Cpu` or
+//! `Device::new_metal`, so the GPU-vs-CPU prefill latency is like-for-like.
 
 use crate::cartridge::{KvAnswer, KvBackend};
 use anyhow::{anyhow, Result};
@@ -29,29 +32,98 @@ use candle_nn::VarBuilder;
 use std::time::Instant;
 use tokenizers::Tokenizer;
 
-const HF_REPO: &str = "Qwen/Qwen2.5-0.5B-Instruct";
-const HID: usize = 896;
-const N_HEAD: usize = 14;
-const N_KV: usize = 2;
-const HEAD_DIM: usize = HID / N_HEAD; // 64
-const Q_DIM: usize = N_HEAD * HEAD_DIM; // 896
-const KV_DIM: usize = N_KV * HEAD_DIM; // 128
-const GROUP: usize = N_HEAD / N_KV; // 7 query heads per KV head
-const N_LAYER: usize = 24;
-const INTER: usize = 4864;
-const VOCAB: usize = 151936;
-const RMS_EPS: f64 = 1e-6;
-const ROPE_THETA: f64 = 1_000_000.0;
-const EOS: u32 = 151645; // <|im_end|>
+/// Default model — the smallest Qwen2.5 instruct checkpoint (ungated, ~1GB bf16).
+pub const DEFAULT_REPO: &str = "Qwen/Qwen2.5-0.5B-Instruct";
+
 const MAX_CTX: usize = 64; // cap cartridge prefix tokens
 const MAX_NEW: usize = 8; // generated tokens per answer
 const MAX_POS: usize = MAX_CTX + MAX_NEW + 8; // RoPE table length
+const MAGIC: &[u8; 4] = b"CWK5";
 
-const MAGIC_F32: &[u8; 4] = b"CWF4";
+/// Cartridge tensor precision for the on-device forward.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Precision {
+    /// Full f32 (exact, larger, the correctness baseline).
+    F32,
+    /// Half f16 (smaller weights, faster Metal kernels, small bounded error).
+    F16,
+}
+
+impl Precision {
+    fn dtype(self) -> DType {
+        match self {
+            Precision::F32 => DType::F32,
+            Precision::F16 => DType::F16,
+        }
+    }
+    /// The [`CartridgeKey::quant`](crate::CartridgeKey::quant) label this maps to.
+    pub fn label(self) -> &'static str {
+        match self {
+            Precision::F32 => "f32",
+            Precision::F16 => "f16",
+        }
+    }
+}
+
+/// Architecture dimensions read from a Qwen2 `config.json`.
+#[derive(Debug, Clone)]
+struct QwenConfig {
+    hid: usize,
+    n_head: usize,
+    n_kv: usize,
+    head_dim: usize,
+    n_layer: usize,
+    inter: usize,
+    vocab: usize,
+    eps: f64,
+    rope_theta: f64,
+    eos: u32,
+}
+
+impl QwenConfig {
+    fn q_dim(&self) -> usize {
+        self.n_head * self.head_dim
+    }
+    fn kv_dim(&self) -> usize {
+        self.n_kv * self.head_dim
+    }
+    fn group(&self) -> usize {
+        self.n_head / self.n_kv
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct RawConfig {
+    hidden_size: usize,
+    num_attention_heads: usize,
+    num_key_value_heads: usize,
+    num_hidden_layers: usize,
+    intermediate_size: usize,
+    vocab_size: usize,
+    rms_norm_eps: f64,
+    rope_theta: f64,
+    eos_token_id: u32,
+}
+
+impl From<RawConfig> for QwenConfig {
+    fn from(r: RawConfig) -> Self {
+        Self {
+            head_dim: r.hidden_size / r.num_attention_heads,
+            hid: r.hidden_size,
+            n_head: r.num_attention_heads,
+            n_kv: r.num_key_value_heads,
+            n_layer: r.num_hidden_layers,
+            inter: r.intermediate_size,
+            vocab: r.vocab_size,
+            eps: r.rms_norm_eps,
+            rope_theta: r.rope_theta,
+            eos: r.eos_token_id,
+        }
+    }
+}
 
 /// Pick the fastest available device: Metal GPU when the `metal` feature is on
-/// and a device is present, otherwise CPU. Never panics — always returns a
-/// usable device.
+/// and a device is present, otherwise CPU. Never panics.
 pub fn best_device() -> Device {
     #[cfg(feature = "metal")]
     {
@@ -75,18 +147,18 @@ pub fn device_label(d: &Device) -> &'static str {
 
 /// One transformer block's weights as on-device tensors.
 struct Block {
-    ln1: Tensor,    // [HID]
-    q_w: Tensor,    // [Q_DIM, HID]
-    q_b: Tensor,    // [Q_DIM]
-    k_w: Tensor,    // [KV_DIM, HID]
-    k_b: Tensor,    // [KV_DIM]
-    v_w: Tensor,    // [KV_DIM, HID]
-    v_b: Tensor,    // [KV_DIM]
-    o_w: Tensor,    // [HID, Q_DIM]
-    ln2: Tensor,    // [HID]
-    gate_w: Tensor, // [INTER, HID]
-    up_w: Tensor,   // [INTER, HID]
-    down_w: Tensor, // [HID, INTER]
+    ln1: Tensor,
+    q_w: Tensor,
+    q_b: Tensor,
+    k_w: Tensor,
+    k_b: Tensor,
+    v_w: Tensor,
+    v_b: Tensor,
+    o_w: Tensor,
+    ln2: Tensor,
+    gate_w: Tensor,
+    up_w: Tensor,
+    down_w: Tensor,
 }
 
 /// Per-layer growing KV cache as on-device tensors, each `[n_kv, total, head_dim]`.
@@ -100,11 +172,13 @@ struct LayerCache {
 pub struct QwenCandleBackend {
     model_id: String,
     device: Device,
-    embed: Tensor, // [VOCAB, HID] — also the tied lm_head
+    dtype: DType,
+    cfg: QwenConfig,
+    embed: Tensor, // [vocab, hid] — also the tied lm_head
     blocks: Vec<Block>,
-    norm: Tensor, // final RMSNorm [HID]
-    cos: Tensor,  // [MAX_POS, HEAD_DIM/2]
-    sin: Tensor,  // [MAX_POS, HEAD_DIM/2]
+    norm: Tensor,
+    cos: Tensor, // [MAX_POS, head_dim/2]
+    sin: Tensor,
     tokenizer: Tokenizer,
 }
 
@@ -118,68 +192,94 @@ fn linear(x: &Tensor, w: &Tensor, b: Option<&Tensor>) -> Result<Tensor> {
 }
 
 /// Repeat KV heads to match query heads (grouped-query attention).
-/// `x [n_kv, t, d]` → `[n_kv*GROUP, t, d]`.
-fn repeat_kv(x: &Tensor) -> Result<Tensor> {
-    if GROUP == 1 {
+/// `x [n_kv, t, d]` → `[n_kv*group, t, d]`.
+fn repeat_kv(x: &Tensor, group: usize) -> Result<Tensor> {
+    if group == 1 {
         return Ok(x.clone());
     }
     let (nkv, t, d) = x.dims3()?;
     Ok(x.unsqueeze(1)?
-        .expand((nkv, GROUP, t, d))?
-        .reshape((nkv * GROUP, t, d))?)
+        .expand((nkv, group, t, d))?
+        .reshape((nkv * group, t, d))?)
 }
 
 impl QwenCandleBackend {
-    /// Download (cached) + load Qwen2.5-0.5B-Instruct onto the best device.
+    /// Load the default model ([`DEFAULT_REPO`]) at f32 onto the best device.
     pub fn load() -> Result<Self> {
-        Self::load_on(best_device())
+        Self::load_repo(DEFAULT_REPO, best_device(), Precision::F32)
     }
 
-    /// Load onto a specific device (used to measure GPU vs CPU on identical code).
+    /// Load the default model at f32 onto a specific device (for GPU-vs-CPU).
     pub fn load_on(device: Device) -> Result<Self> {
+        Self::load_repo(DEFAULT_REPO, device, Precision::F32)
+    }
+
+    /// Load the default model at f32 forced onto the CPU — the baseline half of
+    /// the GPU-vs-CPU comparison, without the caller needing a `candle` `Device`.
+    pub fn load_cpu() -> Result<Self> {
+        Self::load_repo(DEFAULT_REPO, Device::Cpu, Precision::F32)
+    }
+
+    /// Load any Qwen2-family `repo` at the given precision onto `device`. The
+    /// architecture comes from the repo's `config.json`, so larger sizes load
+    /// without code changes.
+    pub fn load_repo(repo: &str, device: Device, precision: Precision) -> Result<Self> {
         use hf_hub::api::sync::Api;
         let api = Api::new().map_err(|e| anyhow!("hf-hub init: {e}"))?;
-        let repo = api.model(HF_REPO.to_string());
-        let weights = repo
+        let r = api.model(repo.to_string());
+        let cfg_path = r
+            .get("config.json")
+            .map_err(|e| anyhow!("download config: {e}"))?;
+        let weights = r
             .get("model.safetensors")
             .map_err(|e| anyhow!("download weights: {e}"))?;
-        let tok = repo
+        let tok = r
             .get("tokenizer.json")
             .map_err(|e| anyhow!("download tokenizer: {e}"))?;
-        // VarBuilder converts bf16 → f32 on load; we keep the forward in f32.
+
+        let raw: RawConfig = serde_json::from_slice(&std::fs::read(&cfg_path)?)
+            .map_err(|e| anyhow!("parse config.json: {e}"))?;
+        let cfg = QwenConfig::from(raw);
+        let dtype = precision.dtype();
+
+        // VarBuilder converts the on-disk dtype (bf16) → the chosen compute dtype.
         let vb = unsafe {
-            VarBuilder::from_mmaped_safetensors(&[weights], DType::F32, &device)
+            VarBuilder::from_mmaped_safetensors(&[weights], dtype, &device)
                 .map_err(|e| anyhow!("mmap safetensors: {e}"))?
         };
 
-        let embed = vb.get((VOCAB, HID), "model.embed_tokens.weight")?;
-        let mut blocks = Vec::with_capacity(N_LAYER);
-        for i in 0..N_LAYER {
+        let embed = vb.get((cfg.vocab, cfg.hid), "model.embed_tokens.weight")?;
+        let mut blocks = Vec::with_capacity(cfg.n_layer);
+        let (q_dim, kv_dim) = (cfg.q_dim(), cfg.kv_dim());
+        for i in 0..cfg.n_layer {
             let p = vb.pp(format!("model.layers.{i}"));
             let attn = p.pp("self_attn");
             let mlp = p.pp("mlp");
             blocks.push(Block {
-                ln1: p.get(HID, "input_layernorm.weight")?,
-                q_w: attn.get((Q_DIM, HID), "q_proj.weight")?,
-                q_b: attn.get(Q_DIM, "q_proj.bias")?,
-                k_w: attn.get((KV_DIM, HID), "k_proj.weight")?,
-                k_b: attn.get(KV_DIM, "k_proj.bias")?,
-                v_w: attn.get((KV_DIM, HID), "v_proj.weight")?,
-                v_b: attn.get(KV_DIM, "v_proj.bias")?,
-                o_w: attn.get((HID, Q_DIM), "o_proj.weight")?,
-                ln2: p.get(HID, "post_attention_layernorm.weight")?,
-                gate_w: mlp.get((INTER, HID), "gate_proj.weight")?,
-                up_w: mlp.get((INTER, HID), "up_proj.weight")?,
-                down_w: mlp.get((HID, INTER), "down_proj.weight")?,
+                ln1: p.get(cfg.hid, "input_layernorm.weight")?,
+                q_w: attn.get((q_dim, cfg.hid), "q_proj.weight")?,
+                q_b: attn.get(q_dim, "q_proj.bias")?,
+                k_w: attn.get((kv_dim, cfg.hid), "k_proj.weight")?,
+                k_b: attn.get(kv_dim, "k_proj.bias")?,
+                v_w: attn.get((kv_dim, cfg.hid), "v_proj.weight")?,
+                v_b: attn.get(kv_dim, "v_proj.bias")?,
+                o_w: attn.get((cfg.hid, q_dim), "o_proj.weight")?,
+                ln2: p.get(cfg.hid, "post_attention_layernorm.weight")?,
+                gate_w: mlp.get((cfg.inter, cfg.hid), "gate_proj.weight")?,
+                up_w: mlp.get((cfg.inter, cfg.hid), "up_proj.weight")?,
+                down_w: mlp.get((cfg.hid, cfg.inter), "down_proj.weight")?,
             });
         }
-        let norm = vb.get(HID, "model.norm.weight")?;
-        let (cos, sin) = Self::rope_tables(&device)?;
+        let norm = vb.get(cfg.hid, "model.norm.weight")?;
+        let (cos, sin) = Self::rope_tables(&cfg, dtype, &device)?;
         let tokenizer = Tokenizer::from_file(&tok).map_err(|e| anyhow!("tokenizer: {e}"))?;
 
+        let short = repo.rsplit('/').next().unwrap_or(repo).to_ascii_lowercase();
         Ok(Self {
-            model_id: "qwen2.5-0.5b-instruct-candle".to_string(),
+            model_id: format!("{short}-candle-{}", precision.label()),
             device,
+            dtype,
+            cfg,
             embed,
             blocks,
             norm,
@@ -189,11 +289,11 @@ impl QwenCandleBackend {
         })
     }
 
-    /// RoPE cos/sin tables, shape `[MAX_POS, HEAD_DIM/2]` (rotate-half layout).
-    fn rope_tables(device: &Device) -> Result<(Tensor, Tensor)> {
-        let half = HEAD_DIM / 2;
+    /// RoPE cos/sin tables `[MAX_POS, head_dim/2]` (rotate-half), in `dtype`.
+    fn rope_tables(cfg: &QwenConfig, dtype: DType, device: &Device) -> Result<(Tensor, Tensor)> {
+        let half = cfg.head_dim / 2;
         let inv_freq: Vec<f32> = (0..half)
-            .map(|j| (1.0 / ROPE_THETA.powf(2.0 * j as f64 / HEAD_DIM as f64)) as f32)
+            .map(|j| (1.0 / cfg.rope_theta.powf(2.0 * j as f64 / cfg.head_dim as f64)) as f32)
             .collect();
         let mut cos = Vec::with_capacity(MAX_POS * half);
         let mut sin = Vec::with_capacity(MAX_POS * half);
@@ -204,8 +304,8 @@ impl QwenCandleBackend {
                 sin.push(a.sin());
             }
         }
-        let cos = Tensor::from_vec(cos, (MAX_POS, half), device)?;
-        let sin = Tensor::from_vec(sin, (MAX_POS, half), device)?;
+        let cos = Tensor::from_vec(cos, (MAX_POS, half), device)?.to_dtype(dtype)?;
+        let sin = Tensor::from_vec(sin, (MAX_POS, half), device)?.to_dtype(dtype)?;
         Ok((cos, sin))
     }
 
@@ -214,54 +314,61 @@ impl QwenCandleBackend {
         device_label(&self.device)
     }
 
+    /// The active precision label (`f32` / `f16`).
+    pub fn precision_label(&self) -> &'static str {
+        if self.dtype == DType::F16 {
+            "f16"
+        } else {
+            "f32"
+        }
+    }
+
     fn empty_cache(&self) -> Vec<Option<LayerCache>> {
         (0..self.blocks.len()).map(|_| None).collect()
     }
 
-    /// Forward `ids` (a batch of `seq` tokens) at absolute positions
-    /// `start_pos..start_pos+seq`, growing each layer's KV cache and attending
-    /// causally over it. Returns the **last token's** logits `[VOCAB]`.
+    /// Forward `ids` at absolute positions `start_pos..start_pos+seq`, growing
+    /// each layer's KV cache and attending causally over it. Returns the last
+    /// token's logits `[vocab]`.
     fn forward(
         &self,
         ids: &[u32],
         start_pos: usize,
         cache: &mut [Option<LayerCache>],
     ) -> Result<Tensor> {
+        let cfg = &self.cfg;
+        let (q_dim, head_dim, n_head, n_kv) = (cfg.q_dim(), cfg.head_dim, cfg.n_head, cfg.n_kv);
         let seq = ids.len();
         let id_t = Tensor::from_vec(ids.to_vec(), (seq,), &self.device)?;
-        let mut h = self.embed.index_select(&id_t, 0)?; // [seq, HID]
+        let mut h = self.embed.index_select(&id_t, 0)?; // [seq, hid]
 
-        // RoPE slices for these absolute positions.
         let cos = self.cos.narrow(0, start_pos, seq)?;
         let sin = self.sin.narrow(0, start_pos, seq)?;
-        let scale = (HEAD_DIM as f64).sqrt();
+        let scale = (head_dim as f64).sqrt();
 
         for (li, blk) in self.blocks.iter().enumerate() {
             // --- attention ---
-            let normed = candle_nn::ops::rms_norm(&h.contiguous()?, &blk.ln1, RMS_EPS as f32)?;
-            let q = linear(&normed, &blk.q_w, Some(&blk.q_b))?; // [seq, Q_DIM]
-            let k = linear(&normed, &blk.k_w, Some(&blk.k_b))?; // [seq, KV_DIM]
-            let v = linear(&normed, &blk.v_w, Some(&blk.v_b))?; // [seq, KV_DIM]
+            let normed = candle_nn::ops::rms_norm(&h.contiguous()?, &blk.ln1, cfg.eps as f32)?;
+            let q = linear(&normed, &blk.q_w, Some(&blk.q_b))?;
+            let k = linear(&normed, &blk.k_w, Some(&blk.k_b))?;
+            let v = linear(&normed, &blk.v_w, Some(&blk.v_b))?;
 
-            // → [heads, seq, head_dim]
             let q = q
-                .reshape((seq, N_HEAD, HEAD_DIM))?
+                .reshape((seq, n_head, head_dim))?
                 .transpose(0, 1)?
                 .contiguous()?;
             let k = k
-                .reshape((seq, N_KV, HEAD_DIM))?
+                .reshape((seq, n_kv, head_dim))?
                 .transpose(0, 1)?
                 .contiguous()?;
             let v = v
-                .reshape((seq, N_KV, HEAD_DIM))?
+                .reshape((seq, n_kv, head_dim))?
                 .transpose(0, 1)?
                 .contiguous()?;
 
-            // RoPE on Q and K (rotate-half), via a [1,h,seq,d] batch dim.
             let q = candle_nn::rotary_emb::rope(&q.unsqueeze(0)?, &cos, &sin)?.squeeze(0)?;
             let k = candle_nn::rotary_emb::rope(&k.unsqueeze(0)?, &cos, &sin)?.squeeze(0)?;
 
-            // Append to cache → [n_kv, total, head_dim].
             let (k_all, v_all) = match &cache[li] {
                 Some(c) => (Tensor::cat(&[&c.k, &k], 1)?, Tensor::cat(&[&c.v, &v], 1)?),
                 None => (k.clone(), v.clone()),
@@ -272,22 +379,20 @@ impl QwenCandleBackend {
             });
             let total = k_all.dim(1)?;
 
-            // Grouped-query attention: repeat KV heads to N_HEAD.
-            let k_rep = repeat_kv(&k_all)?; // [N_HEAD, total, hd]
-            let v_rep = repeat_kv(&v_all)?;
-            // scores [N_HEAD, seq, total]
+            let k_rep = repeat_kv(&k_all, cfg.group())?;
+            let v_rep = repeat_kv(&v_all, cfg.group())?;
+            // scores [n_head, seq, total]; softmax in f32 for numerical safety.
             let scores = (q.matmul(&k_rep.transpose(1, 2)?.contiguous()?)? / scale)?;
-            // causal mask: new row i (abs pos start_pos+i) may see cols 0..=start_pos+i.
             let mask = self.causal_mask(seq, total, start_pos)?;
-            let scores = scores.broadcast_add(&mask)?;
-            let probs = candle_nn::ops::softmax_last_dim(&scores)?;
-            let ctx = probs.matmul(&v_rep)?; // [N_HEAD, seq, hd]
-            let ctx = ctx.transpose(0, 1)?.reshape((seq, Q_DIM))?; // [seq, Q_DIM]
+            let scores = scores.broadcast_add(&mask)?.to_dtype(DType::F32)?;
+            let probs = candle_nn::ops::softmax_last_dim(&scores)?.to_dtype(self.dtype)?;
+            let ctx = probs.matmul(&v_rep)?; // [n_head, seq, head_dim]
+            let ctx = ctx.transpose(0, 1)?.reshape((seq, q_dim))?;
             let o = linear(&ctx, &blk.o_w, None)?;
             h = (h + o)?;
 
             // --- MLP (SwiGLU) ---
-            let normed2 = candle_nn::ops::rms_norm(&h.contiguous()?, &blk.ln2, RMS_EPS as f32)?;
+            let normed2 = candle_nn::ops::rms_norm(&h.contiguous()?, &blk.ln2, cfg.eps as f32)?;
             let gate = candle_nn::ops::silu(&linear(&normed2, &blk.gate_w, None)?)?;
             let up = linear(&normed2, &blk.up_w, None)?;
             let act = (gate * up)?;
@@ -295,25 +400,25 @@ impl QwenCandleBackend {
             h = (h + down)?;
         }
 
-        let h = candle_nn::ops::rms_norm(&h.contiguous()?, &self.norm, RMS_EPS as f32)?;
-        let last = h.i(seq - 1)?; // [HID]
-                                  // logits = last · embedᵀ  (tied lm_head)
+        let h = candle_nn::ops::rms_norm(&h.contiguous()?, &self.norm, cfg.eps as f32)?;
+        let last = h.i(seq - 1)?;
         let logits = last.unsqueeze(0)?.matmul(&self.embed.t()?)?.squeeze(0)?;
-        Ok(logits)
+        Ok(logits.to_dtype(DType::F32)?)
     }
 
-    /// Additive causal mask `[seq, total]`: 0 where attendable, -inf otherwise.
+    /// Additive causal mask `[seq, total]` in the compute dtype: 0 where
+    /// attendable, -inf otherwise.
     fn causal_mask(&self, seq: usize, total: usize, start_pos: usize) -> Result<Tensor> {
         let mut m = vec![0f32; seq * total];
         for i in 0..seq {
-            let limit = start_pos + i; // last attendable column index
+            let limit = start_pos + i;
             for (j, slot) in m[i * total..(i + 1) * total].iter_mut().enumerate() {
                 if j > limit {
                     *slot = f32::NEG_INFINITY;
                 }
             }
         }
-        Ok(Tensor::from_vec(m, (seq, total), &self.device)?)
+        Ok(Tensor::from_vec(m, (seq, total), &self.device)?.to_dtype(self.dtype)?)
     }
 
     fn prefill(&self, ids: &[u32]) -> Result<Vec<Option<LayerCache>>> {
@@ -340,7 +445,7 @@ impl QwenCandleBackend {
                 break;
             }
             let next = logits.argmax(D::Minus1)?.to_scalar::<u32>()?;
-            if next == EOS {
+            if next == self.cfg.eos {
                 break;
             }
             out.push(next);
@@ -375,17 +480,21 @@ impl QwenCandleBackend {
         Ok(self.decode(&gen))
     }
 
-    /// Wall-clock cost of prefilling `contents` on this device (for the GPU-vs-CPU
-    /// latency comparison).
+    /// Wall-clock cost of prefilling `contents` on this device (GPU-vs-CPU).
     pub fn time_prefill(&self, contents: &[String]) -> Result<std::time::Duration> {
         let ctx = self.context_ids(contents);
         let start = Instant::now();
         let _ = self.prefill(&ctx)?;
         Ok(start.elapsed())
     }
+
+    /// Number of transformer layers (for metrics).
+    pub fn n_layers(&self) -> usize {
+        self.cfg.n_layer
+    }
 }
 
-// ---------------- cartridge blob codec (compact binary, f32) ----------------
+// ---------------- cartridge blob codec (compact binary, self-describing) ------
 
 fn put_u32(buf: &mut Vec<u8>, v: usize) {
     buf.extend_from_slice(&(v as u32).to_le_bytes());
@@ -397,13 +506,22 @@ fn get_u32(buf: &[u8], off: &mut usize) -> Option<usize> {
     Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize)
 }
 
-/// Serialize the prefilled KV cache as the cartridge blob. Each layer's K/V is
-/// pulled to host f32 in `[total, KV_DIM]` row-major (KV heads concatenated).
-fn encode_blob(prefix_len: usize, cache: &[Option<LayerCache>]) -> Result<Vec<u8>> {
+/// Serialize the prefilled KV cache (host f32, `[total, kv_dim]` per layer with
+/// KV heads concatenated). The `kv_dim` is stored so decode is self-describing
+/// across model sizes.
+fn encode_blob(
+    prefix_len: usize,
+    kv_dim: usize,
+    n_kv: usize,
+    cache: &[Option<LayerCache>],
+) -> Result<Vec<u8>> {
+    let head_dim = kv_dim / n_kv;
     let mut buf = Vec::new();
-    buf.extend_from_slice(MAGIC_F32);
+    buf.extend_from_slice(MAGIC);
     put_u32(&mut buf, prefix_len);
     put_u32(&mut buf, cache.len());
+    put_u32(&mut buf, kv_dim);
+    put_u32(&mut buf, n_kv);
     for layer in cache {
         let Some(c) = layer else {
             put_u32(&mut buf, 0);
@@ -411,15 +529,14 @@ fn encode_blob(prefix_len: usize, cache: &[Option<LayerCache>]) -> Result<Vec<u8
         };
         let total = c.k.dim(1)?;
         put_u32(&mut buf, total);
-        // [n_kv, total, hd] → [total, n_kv, hd] → [total, KV_DIM]
-        let k =
-            c.k.transpose(0, 1)?
-                .reshape((total, KV_DIM))?
-                .to_vec2::<f32>()?;
-        let v =
-            c.v.transpose(0, 1)?
-                .reshape((total, KV_DIM))?
-                .to_vec2::<f32>()?;
+        let to_rows = |t: &Tensor| -> Result<Vec<Vec<f32>>> {
+            Ok(t.to_dtype(DType::F32)?
+                .transpose(0, 1)?
+                .reshape((total, n_kv * head_dim))?
+                .to_vec2::<f32>()?)
+        };
+        let k = to_rows(&c.k)?;
+        let v = to_rows(&c.v)?;
         for row in k.iter().chain(v.iter()) {
             for &x in row {
                 buf.extend_from_slice(&x.to_le_bytes());
@@ -429,14 +546,24 @@ fn encode_blob(prefix_len: usize, cache: &[Option<LayerCache>]) -> Result<Vec<u8
     Ok(buf)
 }
 
-/// Inverse of [`encode_blob`]: restore the KV cache onto `device`.
-fn decode_blob(blob: &[u8], device: &Device) -> Option<(usize, Vec<Option<LayerCache>>)> {
-    if blob.get(0..4)? != MAGIC_F32 {
+/// Inverse of [`encode_blob`]: restore the KV cache onto `device` in `dtype`.
+fn decode_blob(
+    blob: &[u8],
+    device: &Device,
+    dtype: DType,
+) -> Option<(usize, Vec<Option<LayerCache>>)> {
+    if blob.get(0..4)? != MAGIC {
         return None;
     }
     let mut off = 4usize;
     let prefix_len = get_u32(blob, &mut off)?;
     let n_layers = get_u32(blob, &mut off)?;
+    let kv_dim = get_u32(blob, &mut off)?;
+    let n_kv = get_u32(blob, &mut off)?;
+    if n_kv == 0 {
+        return None;
+    }
+    let head_dim = kv_dim / n_kv;
     let mut cache = Vec::with_capacity(n_layers);
     for _ in 0..n_layers {
         let total = get_u32(blob, &mut off)?;
@@ -445,7 +572,7 @@ fn decode_blob(blob: &[u8], device: &Device) -> Option<(usize, Vec<Option<LayerC
             continue;
         }
         let read = |off: &mut usize| -> Option<Tensor> {
-            let n = total * KV_DIM;
+            let n = total * kv_dim;
             let mut flat = vec![0f32; n];
             for slot in flat.iter_mut() {
                 let end = off.checked_add(4)?;
@@ -453,13 +580,16 @@ fn decode_blob(blob: &[u8], device: &Device) -> Option<(usize, Vec<Option<LayerC
                 *off = end;
                 *slot = f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
             }
-            // [total, KV_DIM] → [total, n_kv, hd] → [n_kv, total, hd]
-            let t = Tensor::from_vec(flat, (total, KV_DIM), device).ok()?;
-            t.reshape((total, N_KV, HEAD_DIM))
+            // [total, kv_dim] → [total, n_kv, head_dim] → [n_kv, total, head_dim]
+            Tensor::from_vec(flat, (total, kv_dim), device)
+                .ok()?
+                .reshape((total, n_kv, head_dim))
                 .ok()?
                 .transpose(0, 1)
                 .ok()?
                 .contiguous()
+                .ok()?
+                .to_dtype(dtype)
                 .ok()
         };
         let k = read(&mut off)?;
@@ -477,14 +607,15 @@ impl KvBackend for QwenCandleBackend {
 
     async fn compile_blob(&self, contents: &[String]) -> Vec<u8> {
         let ctx = self.context_ids(contents);
+        let (kv_dim, n_kv) = (self.cfg.kv_dim(), self.cfg.n_kv);
         self.prefill(&ctx)
-            .and_then(|c| encode_blob(ctx.len(), &c))
+            .and_then(|c| encode_blob(ctx.len(), kv_dim, n_kv, &c))
             .unwrap_or_default()
     }
 
     async fn answer(&self, blob: &[u8], query: &str) -> KvAnswer {
         let start = Instant::now();
-        let (prefix_len, mut cache) = match decode_blob(blob, &self.device) {
+        let (prefix_len, mut cache) = match decode_blob(blob, &self.device, self.dtype) {
             Some(p) => p,
             None => {
                 return KvAnswer {
@@ -495,7 +626,7 @@ impl KvBackend for QwenCandleBackend {
             }
         };
         let q = self.encode(query, MAX_CTX);
-        if cache.len() != N_LAYER || q.is_empty() {
+        if cache.len() != self.cfg.n_layer || q.is_empty() {
             return KvAnswer {
                 text: String::new(),
                 latency_us: start.elapsed().as_micros() as u64,
@@ -540,10 +671,14 @@ mod tests {
     #[ignore = "downloads Qwen2.5-0.5B (~1GB) + runs a real GPU forward"]
     async fn candle_cartridge_is_exact_erasable_and_fast() {
         let be = QwenCandleBackend::load().expect("load qwen (candle)");
-        eprintln!("candle backend device: {}", be.device_label());
+        eprintln!(
+            "candle backend: {} / {} / {} layers",
+            be.device_label(),
+            be.precision_label(),
+            be.n_layers()
+        );
 
-        // (1) Self-consistency: cartridge generation == full-prompt generation,
-        // both on the same device (so rounding matches → token-identical).
+        // (1) Self-consistency: cartridge generation == full-prompt generation.
         let ctx = vec![
             "Paris is the capital of France.".to_string(),
             "Berlin is the capital of Germany.".to_string(),
@@ -566,7 +701,7 @@ mod tests {
         );
         eprintln!("candle cartridge answer: {:?}", from_cartridge.text);
 
-        // (2) Erasure-by-recompile: the fact is gone from generation.
+        // (2) Erasure-by-recompile.
         let with_fact = vec!["The project's codename is Nimbus.".to_string()];
         let without = vec!["The weather is sunny today.".to_string()];
         let q = "\nQuestion: What is the project's codename?\nAnswer:";
@@ -588,5 +723,83 @@ mod tests {
             cpu,
             cpu.as_secs_f64() / gpu.as_secs_f64().max(1e-9)
         );
+    }
+
+    /// f16 precision: smaller/faster, must still answer correctly.
+    #[tokio::test]
+    #[ignore = "downloads Qwen2.5-0.5B (~1GB) + runs an f16 GPU forward"]
+    async fn candle_f16_is_faster_and_still_answers() {
+        let f32_be = QwenCandleBackend::load_repo(DEFAULT_REPO, best_device(), Precision::F32)
+            .expect("load f32");
+        let f16_be = QwenCandleBackend::load_repo(DEFAULT_REPO, best_device(), Precision::F16)
+            .expect("load f16");
+        assert_eq!(f16_be.precision_label(), "f16");
+
+        let ctx = vec![
+            "Paris is the capital of France.".to_string(),
+            "Berlin is the capital of Germany.".to_string(),
+        ];
+        let query = "\nQuestion: What is the capital of France?\nAnswer:";
+        let ans = f16_be.answer(&f16_be.compile_blob(&ctx).await, query).await;
+        assert!(ans.answered);
+        assert!(
+            ans.text.contains("Paris"),
+            "f16 should still answer 'Paris', got {:?}",
+            ans.text
+        );
+
+        let big: Vec<String> = (0..8)
+            .map(|i| format!("Fact {i}: the quick brown fox jumps over the lazy dog."))
+            .collect();
+        // Warm each backend first — the first call of a given dtype on Metal
+        // pays one-time shader compilation, which would otherwise dwarf the
+        // measurement. After warmup the comparison is fair.
+        let _ = f32_be.time_prefill(&big);
+        let _ = f16_be.time_prefill(&big);
+        let t32 = f32_be.time_prefill(&big).expect("f32 prefill");
+        let t16 = f16_be.time_prefill(&big).expect("f16 prefill");
+        // At this tiny scale prefill is dispatch-bound, so we do NOT assert f16
+        // is faster — its real win is memory (half the resident weights). We
+        // only assert it answers correctly; the times are reported for context.
+        eprintln!(
+            "prefill (warm) — f32: {:?}, f16: {:?}; f16 answer: {:?}",
+            t32, t16, ans.text
+        );
+    }
+
+    /// A *larger* model (Qwen2.5-1.5B, 28 layers) loads + answers via the same
+    /// config-driven path. Runs at **f32**: f16 is validated on the 0.5B model,
+    /// but the deeper 1.5B residual stream is numerically unstable in half
+    /// precision (a mixed-precision residual is future work), so larger models
+    /// use f32 today.
+    #[tokio::test]
+    #[ignore = "downloads Qwen2.5-1.5B (~3GB) + runs a real forward"]
+    async fn candle_larger_model_loads_and_answers() {
+        let be = QwenCandleBackend::load_repo(
+            "Qwen/Qwen2.5-1.5B-Instruct",
+            best_device(),
+            Precision::F32,
+        )
+        .expect("load qwen 1.5b");
+        eprintln!(
+            "candle backend: {} / {} / {} layers",
+            be.device_label(),
+            be.precision_label(),
+            be.n_layers()
+        );
+        let ctx = vec!["Paris is the capital of France.".to_string()];
+        let ans = be
+            .answer(
+                &be.compile_blob(&ctx).await,
+                "\nQuestion: What is the capital of France?\nAnswer:",
+            )
+            .await;
+        assert!(ans.answered);
+        assert!(
+            ans.text.contains("Paris"),
+            "1.5B should answer 'Paris', got {:?}",
+            ans.text
+        );
+        eprintln!("qwen 1.5b answer: {:?}", ans.text);
     }
 }

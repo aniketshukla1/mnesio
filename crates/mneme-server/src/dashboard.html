@@ -1334,6 +1334,7 @@
 
     <div id="kv-kpis" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:16px;"></div>
     <div id="kv-facets" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:16px;"></div>
+    <div id="kv-gpu" style="margin-top:18px;"></div>
     <div id="kv-note" style="color:#9aa3b2;font-size:12px;margin-top:14px;"></div>
   </section>
   <script>
@@ -1380,7 +1381,32 @@
           "members " + d.members_before_shred + " → " + d.members_after_shred,
           "answerable about subject: <b>" + d.answerable_before_shred + "</b> → <b>" + d.answerable_after_shred + "</b>",
         ]);
+      renderGpu(d.gpu);
       note.textContent = "Read-only w.r.t. the log: the keyring + cartridge store are ephemeral per request — compiling a cartridge appends nothing. Forget a subject's key + recompile and the rebuilt tensor can't reconstruct the erased content (Hard Rule #2).";
+    }
+    function renderGpu(g) {
+      var el = document.getElementById("kv-gpu");
+      if (!g) { el.innerHTML = ""; return; } // server built without --features candle-kv
+      var head = '<div style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#d29922;margin-bottom:8px;">Real GPU backend — Qwen2 via candle</div>';
+      if (!g.enabled) {
+        el.innerHTML = head + '<div style="background:#0c0e14;border:1px dashed #394150;border-radius:9px;padding:12px 14px;color:#9aa3b2;font-size:12px;">' + (g.note || "GPU backend not loaded.") + '</div>';
+        return;
+      }
+      var ok = g.kv_correct && g.shred_succeeded;
+      var color = ok ? "#3fb950" : "#f85149";
+      el.innerHTML = head
+        + '<div style="display:flex;gap:14px;flex-wrap:wrap;">'
+        + kpi("device", g.device, "#58a6ff")
+        + kpi("precision", g.precision)
+        + kpi("model", g.model_id + " (" + g.n_layers + "L)", "#58a6ff")
+        + kpi("GPU prefill", (g.prefill_gpu_us/1000).toFixed(1) + " ms", "#3fb950")
+        + kpi("GPU vs CPU", g.speedup >= 1 ? g.speedup.toFixed(1) + "×" : "—", "#3fb950")
+        + '</div>'
+        + '<div style="background:#0c0e14;border:1px solid #232836;border-left:3px solid ' + color + ';border-radius:9px;padding:12px 14px;margin-top:12px;">'
+        + '<div style="font-size:12px;color:#c8cfdc;">generated from cartridge: <b>' + (g.kv_answer || "—") + '</b>' + (g.kv_correct ? " ✓correct" : " ✗") + '</div>'
+        + '<div style="font-size:12px;color:#c8cfdc;margin-top:6px;">prefill: GPU <b>' + g.prefill_gpu_us + ' µs</b> vs CPU <b>' + g.prefill_cpu_us + ' µs</b> (identical code, warm)</div>'
+        + '<div style="font-size:12px;color:#c8cfdc;margin-top:6px;">erasure-by-recompile: codename answerable <b>' + g.answerable_before_shred + '</b> → <b>' + g.answerable_after_shred + '</b>' + (g.shred_succeeded ? " ✓" : " ✗") + '</div>'
+        + '</div>';
     }
     function load() {
       var note = document.getElementById("kv-note");

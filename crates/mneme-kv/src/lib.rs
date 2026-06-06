@@ -69,10 +69,21 @@
 //!   can't be built on a remote text endpoint. Live: the cartridge answers
 //!   "capital of France" → "Paris", token-identical to the full prompt (the
 //!   RoPE/GQA cache is exact), and a shred-recompile drops the fact from
-//!   generation. candle + Metal would be a GPU speed-swap behind this same seam.
+//!   generation.
+//!
+//! - [`QwenCandleBackend`] *(features `candle-kv` + `metal`)* — the **GPU**
+//!   version of the same cartridge path, the Qwen2 forward ported to
+//!   [`candle_core`] tensors on Apple Metal. Config-driven (architecture from
+//!   the repo's `config.json`, so 0.5B/1.5B/3B/7B load with no code change) and
+//!   precision-selectable ([`CandlePrecision::F16`] halves resident weights).
+//!   The pure-Rust `qwen-kv` backend is its semantic oracle; we assert candle's
+//!   *own* self-consistency (cartridge == full-prompt, same device + dtype), not
+//!   bit-identity across CPU/GPU. Live on an M1 Pro: ~107× faster warm prefill
+//!   than CPU on identical code, answers "Paris", erasure holds.
 //!
 //! That closes the last open piece of Phase 12: the cartridge is no longer a
-//! retrieval index over a cache — it is the cache the model generates from.
+//! retrieval index over a cache — it is the cache the model generates from, on
+//! CPU or GPU, across model sizes and precisions.
 //!
 //! ## Hard-rule posture
 //!
@@ -98,7 +109,9 @@ mod store;
 mod tensor;
 
 #[cfg(feature = "candle-kv")]
-pub use candle::QwenCandleBackend;
+pub use candle::Precision as CandlePrecision;
+#[cfg(feature = "candle-kv")]
+pub use candle::{QwenCandleBackend, DEFAULT_REPO as CANDLE_DEFAULT_REPO};
 pub use cartridge::{
     compile, Cartridge, CartridgeKey, CartridgeStatus, CompileError, FakeKvBackend, KvAnswer,
     KvBackend, SealedMemory,

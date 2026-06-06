@@ -22,6 +22,12 @@ ollama = ["mneme-llm/ollama"]
 # keeps XorCipher / FakeSigner so the dep tree stays light.
 aead = ["mneme-privacy/aead"]
 ed25519 = ["mneme-exchange/ed25519"]
+# Surface the real GPU KV-cartridge backend (Qwen2 via candle) in
+# `GET /api/kv/metrics`. Heavy dep tree + a ~1GB model download, so it's off by
+# default and additionally gated at runtime by `MNEME_KV_GPU=1`. `metal` adds
+# Apple-GPU kernels. The default server build is unaffected.
+candle-kv = ["mneme-kv/candle-kv"]
+metal = ["mneme-kv/metal"]
 
 [dependencies]
 mneme-core.workspace = true

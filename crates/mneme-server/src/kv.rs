@@ -243,6 +243,12 @@ pub async fn kv_metrics(State(state): State<Arc<AppState>>) -> Response {
         answerable_before_shred: before_shred,
         answerable_after_shred: after_shred,
         shred_succeeded: before_shred && !after_shred,
+        // The real GPU backend section (Qwen2 via candle) — only when the server
+        // is built `--features candle-kv` and `MNEME_KV_GPU=1` is set.
+        #[cfg(feature = "candle-kv")]
+        gpu: gpu::summary().await,
+        #[cfg(not(feature = "candle-kv"))]
+        gpu: None,
     };
     Json(payload).into_response()
 }
@@ -278,6 +284,157 @@ pub struct KvReport {
     pub answerable_before_shred: bool,
     pub answerable_after_shred: bool,
     pub shred_succeeded: bool,
+
+    /// The real GPU KV-cartridge backend section (Qwen2 via candle), present
+    /// only when built `--features candle-kv`. The facets above use the
+    /// deterministic `FakeKvBackend`; this proves the *same* cartridge path on a
+    /// real on-device transformer forward.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu: Option<GpuKvReport>,
+}
+
+/// The real GPU KV-cartridge demonstration (a modern Qwen2 forward on Metal),
+/// computed once and cached for the process lifetime.
+#[derive(Serialize, Clone)]
+pub struct GpuKvReport {
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub model_id: String,
+    pub device: String,
+    pub precision: String,
+    pub n_layers: usize,
+    /// Cartridge answer + correctness on a held-out factual query.
+    pub held_out_query: String,
+    pub kv_answer: String,
+    pub kv_correct: bool,
+    /// Warm GPU vs CPU prefill on identical code.
+    pub prefill_gpu_us: u64,
+    pub prefill_cpu_us: u64,
+    pub speedup: f64,
+    /// Erasure-by-recompile on the real backend.
+    pub erased_query: String,
+    pub answerable_before_shred: bool,
+    pub answerable_after_shred: bool,
+    pub shred_succeeded: bool,
+}
+
+#[cfg(feature = "candle-kv")]
+impl GpuKvReport {
+    fn disabled(note: String) -> Self {
+        Self {
+            enabled: false,
+            note: Some(note),
+            model_id: String::new(),
+            device: String::new(),
+            precision: String::new(),
+            n_layers: 0,
+            held_out_query: String::new(),
+            kv_answer: String::new(),
+            kv_correct: false,
+            prefill_gpu_us: 0,
+            prefill_cpu_us: 0,
+            speedup: 0.0,
+            erased_query: String::new(),
+            answerable_before_shred: false,
+            answerable_after_shred: false,
+            shred_succeeded: false,
+        }
+    }
+}
+
+/// Real GPU KV-cartridge demo, behind `--features candle-kv` + `MNEME_KV_GPU=1`.
+/// Loading a ~1GB model + a CPU baseline is heavy, so it's opt-in and the result
+/// is computed once and cached for the process lifetime.
+#[cfg(feature = "candle-kv")]
+mod gpu {
+    use super::GpuKvReport;
+    use mneme_kv::{KvBackend, QwenCandleBackend};
+    use tokio::sync::OnceCell;
+
+    static CELL: OnceCell<GpuKvReport> = OnceCell::const_new();
+
+    const KV_QUERY: &str = "\nQuestion: What is the capital of France?\nAnswer:";
+    const ERASE_QUERY: &str = "\nQuestion: What is the project's codename?\nAnswer:";
+
+    pub async fn summary() -> Option<GpuKvReport> {
+        if std::env::var("MNEME_KV_GPU").ok().as_deref() != Some("1") {
+            return Some(GpuKvReport::disabled(
+                "set MNEME_KV_GPU=1 to load the real GPU KV backend (downloads ~1GB \
+                 Qwen2.5-0.5B on first run, then caches)"
+                    .to_string(),
+            ));
+        }
+        Some(CELL.get_or_init(compute).await.clone())
+    }
+
+    async fn compute() -> GpuKvReport {
+        let gpu = match QwenCandleBackend::load() {
+            Ok(b) => b,
+            Err(e) => return GpuKvReport::disabled(format!("load failed: {e}")),
+        };
+
+        // (1) Cartridge answer on a held-out factual query.
+        let ctx = vec![
+            "Paris is the capital of France.".to_string(),
+            "Berlin is the capital of Germany.".to_string(),
+        ];
+        let blob = gpu.compile_blob(&ctx).await;
+        let ans = gpu.answer(&blob, KV_QUERY).await;
+        let kv_correct = ans.answered && ans.text.contains("Paris");
+
+        // (2) Warm GPU vs CPU prefill on identical code.
+        let big: Vec<String> = (0..8)
+            .map(|i| format!("Fact {i}: the quick brown fox jumps over the lazy dog."))
+            .collect();
+        let _ = gpu.time_prefill(&big); // warm Metal shaders
+        let prefill_gpu_us = gpu
+            .time_prefill(&big)
+            .map(|d| d.as_micros() as u64)
+            .unwrap_or(0);
+        let prefill_cpu_us = QwenCandleBackend::load_cpu()
+            .and_then(|cpu| cpu.time_prefill(&big))
+            .map(|d| d.as_micros() as u64)
+            .unwrap_or(0);
+        let speedup = if prefill_gpu_us > 0 {
+            prefill_cpu_us as f64 / prefill_gpu_us as f64
+        } else {
+            0.0
+        };
+
+        // (3) Erasure-by-recompile on the real backend.
+        let with_fact = vec!["The project's codename is Nimbus.".to_string()];
+        let without = vec!["The weather is sunny today.".to_string()];
+        let before = gpu
+            .answer(&gpu.compile_blob(&with_fact).await, ERASE_QUERY)
+            .await
+            .text
+            .contains("Nimbus");
+        let after = gpu
+            .answer(&gpu.compile_blob(&without).await, ERASE_QUERY)
+            .await
+            .text
+            .contains("Nimbus");
+
+        GpuKvReport {
+            enabled: true,
+            note: None,
+            model_id: gpu.model_id().to_string(),
+            device: gpu.device_label().to_string(),
+            precision: gpu.precision_label().to_string(),
+            n_layers: gpu.n_layers(),
+            held_out_query: KV_QUERY.trim().to_string(),
+            kv_answer: ans.text.chars().take(140).collect(),
+            kv_correct,
+            prefill_gpu_us,
+            prefill_cpu_us,
+            speedup,
+            erased_query: ERASE_QUERY.trim().to_string(),
+            answerable_before_shred: before,
+            answerable_after_shred: after,
+            shred_succeeded: before && !after,
+        }
+    }
 }
 
 impl KvReport {
@@ -303,6 +460,7 @@ impl KvReport {
             answerable_before_shred: false,
             answerable_after_shred: false,
             shred_succeeded: false,
+            gpu: None,
         }
     }
 }
