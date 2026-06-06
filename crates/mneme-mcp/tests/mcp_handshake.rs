@@ -202,6 +202,151 @@ fn initialize_lists_tools_and_runs_write_then_search() {
     );
 }
 
+/// Helper: call a tool and return the first text-content string.
+fn call_text(
+    stdin: &mut ChildStdin,
+    stdout: &mut BufReader<ChildStdout>,
+    id: i64,
+    name: &str,
+    arguments: serde_json::Value,
+) -> String {
+    send(
+        stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "tools/call",
+            "params": { "name": name, "arguments": arguments }
+        }),
+    );
+    let resp = recv(stdout);
+    assert_eq!(resp["id"], id, "response id must match request id");
+    resp["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// A realistic **agent session** driven over real stdio JSON-RPC — exactly what
+/// OpenClaw / Hermes / Claude Desktop do when they hold a conversation. Proves
+/// the full loop end-to-end without any real agent installed:
+/// multi-memory writes, recall-asserting searches, tenant isolation (the scope
+/// boundary), and an outcome recorded for the procedural compiler.
+///
+/// Referenced from INTEGRATION.md as the deterministic protocol-loop test.
+#[test]
+fn agent_session_over_stdio() {
+    let (_server, mut stdin, mut stdout, _data_dir) = spawn();
+
+    // initialize.
+    send(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+    );
+    assert_eq!(
+        recv(&mut stdout)["result"]["serverInfo"]["name"],
+        "mneme-mcp"
+    );
+
+    // ---- the agent writes several memories for user "alice" ----
+    // Query tokens are aligned with content so recall is robust under the mock
+    // embedder (BM25 carries it; a real embedder only helps).
+    let alice_mems = [
+        "Alice is allergic to peanuts",
+        "The project codename is Nimbus",
+        "Alice prefers window seats on flights",
+    ];
+    for (i, m) in alice_mems.iter().enumerate() {
+        let text = call_text(
+            &mut stdin,
+            &mut stdout,
+            10 + i as i64,
+            "mneme_write_memory",
+            serde_json::json!({"content": m, "tenant": "alice"}),
+        );
+        assert!(text.starts_with("wrote memory "), "write {i}: {text}");
+    }
+    // A different user's memory — must stay isolated by tenant (Hard Rule #3).
+    let text = call_text(
+        &mut stdin,
+        &mut stdout,
+        20,
+        "mneme_write_memory",
+        serde_json::json!({"content": "Bob's favorite color is green", "tenant": "bob"}),
+    );
+    assert!(text.starts_with("wrote memory "));
+
+    // ---- the agent searches alice's memory and gets the right fact ----
+    let allergy = call_text(
+        &mut stdin,
+        &mut stdout,
+        30,
+        "mneme_search",
+        serde_json::json!({"query": "allergic peanuts", "tenant": "alice", "k": 3}),
+    );
+    assert!(
+        allergy.to_lowercase().contains("peanut"),
+        "alice search should recall the peanut allergy; got: {allergy}"
+    );
+
+    let codename = call_text(
+        &mut stdin,
+        &mut stdout,
+        31,
+        "mneme_search",
+        serde_json::json!({"query": "project codename", "tenant": "alice", "k": 3}),
+    );
+    assert!(
+        codename.contains("Nimbus"),
+        "alice search should recall the codename; got: {codename}"
+    );
+
+    // ---- tenant isolation: alice cannot see bob's memory ----
+    // Query avoids bob's content tokens so the echoed-query text can't
+    // false-trigger; a real leak would surface "green"/"Bob" from his memory.
+    let cross = call_text(
+        &mut stdin,
+        &mut stdout,
+        40,
+        "mneme_search",
+        serde_json::json!({"query": "favorite preference", "tenant": "alice", "k": 5}),
+    );
+    assert!(
+        !cross.to_lowercase().contains("green") && !cross.contains("Bob"),
+        "tenant isolation breached — alice saw bob's memory: {cross}"
+    );
+    // …but bob can.
+    let bob = call_text(
+        &mut stdin,
+        &mut stdout,
+        41,
+        "mneme_search",
+        serde_json::json!({"query": "favorite color", "tenant": "bob", "k": 3}),
+    );
+    assert!(
+        bob.to_lowercase().contains("green"),
+        "bob should recall his own memory; got: {bob}"
+    );
+
+    // ---- the agent records a task outcome for the procedural compiler ----
+    // artifacts_used must be a valid ULID; success drives credit assignment.
+    let outcome = call_text(
+        &mut stdin,
+        &mut stdout,
+        50,
+        "mneme_record_outcome",
+        serde_json::json!({
+            "artifacts_used": ["01ARZ3NDEKTSV4RRFFQ69G5FAV"],
+            "success": true,
+            "scores": {"accuracy": 0.95}
+        }),
+    );
+    assert!(
+        !outcome.is_empty() && !outcome.to_lowercase().contains("invalid"),
+        "record_outcome should be accepted; got: {outcome}"
+    );
+}
+
 #[test]
 fn parse_error_for_garbage_input_uses_null_id() {
     let (_server, mut stdin, mut stdout, _data_dir) = spawn();
