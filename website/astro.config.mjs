@@ -25,11 +25,11 @@ export default defineConfig({
         {
           icon: "github",
           label: "GitHub",
-          href: "https://github.com/your-org/mneme",
+          href: "https://github.com/mneme/mneme",
         },
       ],
       editLink: {
-        baseUrl: "https://github.com/your-org/mneme/edit/main/website/",
+        baseUrl: "https://github.com/mneme/mneme/edit/main/website/",
       },
       lastUpdated: true,
       sidebar: [

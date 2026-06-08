@@ -3,9 +3,9 @@
   <p><strong>A self-improving long-term memory layer for AI agents, built in Rust.</strong></p>
 
   <p>
-    <a href="https://github.com/aniketshukla1/mneme/actions"><img alt="Build Status" src="https://img.shields.io/badge/build-passing-brightgreen"></a>
+    <a href="https://github.com/mneme/mneme/actions"><img alt="Build Status" src="https://img.shields.io/badge/build-passing-brightgreen"></a>
     <a href="https://crates.io/crates/mneme"><img alt="Version" src="https://img.shields.io/badge/version-v0.1.0-blue"></a>
-    <a href="https://github.com/aniketshukla1/mneme/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
+    <a href="https://github.com/mneme/mneme/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
     <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-380%20passing-brightgreen"></a>
   </p>
 </div>
@@ -28,7 +28,7 @@ Two continuous loops operate over a single append-only event log:
 ## ⚡ Quick start
 
 ```bash
-git clone https://github.com/aniketshukla1/mneme.git
+git clone https://github.com/mneme/mneme.git
 cd mneme
 
 # Run the workspace tests (380 passing)
@@ -651,6 +651,30 @@ Contributions welcome. A few specific patterns the project enforces:
 - **`cargo fmt` + `cargo clippy -- -D warnings` must pass** on both `--no-default-features` and the default config before any commit.
 - **Tests live next to code** in `#[cfg(test)] mod tests`. Storage tests use a temp dir keyed by a fresh ULID and clean up after themselves.
 - **Conventional commits** — `feat:`, `fix:`, `refactor:`, `test:`, `docs:`.
+
+---
+
+## 💜 Support mneme
+
+mneme is independent, Apache-2.0, and built in the open. Funding goes straight into development time, eval compute (LOCOMO / LongMemEval runs aren't free), and keeping the project independent. If it's useful to you — or you want the frontier roadmap (causal memory, gated KV cartridges, certified skill exchange) to ship faster — consider sponsoring.
+
+<div align="center">
+
+[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub_Sponsors-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/mneme)
+[![Open Collective](https://img.shields.io/badge/Back-Open_Collective-3385FF?logo=opencollective&logoColor=white)](https://opencollective.com/mneme)
+[![Ko-fi](https://img.shields.io/badge/Tip-Ko--fi-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/mneme)
+[![Liberapay](https://img.shields.io/badge/Donate-Liberapay-F6C915?logo=liberapay&logoColor=black)](https://liberapay.com/mneme)
+
+</div>
+
+| Platform | Best for | Fees |
+|---|---|---|
+| **[GitHub Sponsors](https://github.com/sponsors/mneme)** | Recurring + one-time, right next to the code | **0%** (GitHub covers processing) |
+| **[Open Collective](https://opencollective.com/mneme)** | Transparent budget, company backers, a path to a foundation | host + processor |
+| **[Ko-fi](https://ko-fi.com/mneme)** | Quick one-off tips, no account needed | 0% platform |
+| **[Liberapay](https://liberapay.com/mneme)** | Recurring, non-profit, OSS-aligned | 0% |
+
+The **Sponsor** button at the top of the repo is wired through [`.github/FUNDING.yml`](.github/FUNDING.yml).
 
 ---
 
