@@ -662,7 +662,7 @@ mneme is independent, Apache-2.0, and built in the open. Funding goes straight i
 
 [![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub_Sponsors-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/mneme)
 [![Open Collective](https://img.shields.io/badge/Back-Open_Collective-3385FF?logo=opencollective&logoColor=white)](https://opencollective.com/mneme)
-[![Ko-fi](https://img.shields.io/badge/Tip-Ko--fi-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/mneme)
+[![Ko-fi](https://img.shields.io/badge/Tip-Ko--fi-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/mneme)
 [![Liberapay](https://img.shields.io/badge/Donate-Liberapay-F6C915?logo=liberapay&logoColor=black)](https://liberapay.com/mneme)
 
 </div>
