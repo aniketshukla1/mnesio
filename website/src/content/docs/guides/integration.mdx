@@ -1,0 +1,93 @@
+---
+title: Agent integration (MCP)
+description: Wire mneme into any MCP-capable agent and verify the round-trip.
+---
+
+import { Steps, Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+mneme integrates with agents over the **Model Context Protocol**. Any client that
+can launch an MCP server over stdio — Claude Desktop, OpenClaw, Hermes, custom
+loops — can give its agent persistent, self-improving memory.
+
+## The contract
+
+`mneme-mcp` is a stdio JSON-RPC server speaking MCP `2024-11-05`. It implements
+`initialize`, `tools/list`, and `tools/call`, and exposes three tools:
+
+```jsonc
+mneme_write_memory   // { content, tags? }           -> { id }
+mneme_search         // { query, k? }                 -> { hits: [...] }
+mneme_record_outcome // { task, success, detail? }    -> { ok }
+```
+
+`mneme_search` runs the full hybrid pipeline (HNSW + BM25 + RRF) and returns
+ranked hits with an explainable breakdown. `mneme_record_outcome` feeds the
+procedural compiler so the agent improves across sessions.
+
+## Register the server
+
+<Tabs>
+  <TabItem label="Generic MCP">
+```jsonc
+{
+  "mcpServers": {
+    "mneme": {
+      "command": "/abs/path/to/mneme/target/release/mneme-mcp",
+      "args": []
+    }
+  }
+}
+```
+  </TabItem>
+  <TabItem label="With a data dir">
+```jsonc
+{
+  "mcpServers": {
+    "mneme": {
+      "command": "/abs/path/to/mneme/target/release/mneme-mcp",
+      "args": [],
+      "env": { "MNEME_DATA_DIR": "/abs/path/to/mneme-data" }
+    }
+  }
+}
+```
+  </TabItem>
+</Tabs>
+
+## A real agent loop
+
+The pattern that produced mneme's **0% → 83%** agent result is simple and works
+with any tool-calling model:
+
+<Steps>
+
+1. On each user turn, the agent calls `mneme_search` with the query to pull
+   relevant prior memories into context.
+
+2. The model answers using the retrieved context.
+
+3. Salient facts from the turn are persisted with `mneme_write_memory` for next
+   time; task results go to `mneme_record_outcome`.
+
+</Steps>
+
+A reference implementation (stdlib-only Python driving Ollama over the real
+`mneme-mcp` stdio server) lives at `examples/agent_loop_eval.py`. With memory
+**off** the agent answered 0 / 6 private-fact questions; with memory **on**, 5 / 6.
+
+<Aside type="note">
+That eval is deliberately small and reproducible — see
+[Benchmarks](/reference/benchmarks/) for the exact setup. It demonstrates the
+mechanism, not a leaderboard score.
+</Aside>
+
+## Verify the handshake
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  | ./target/release/mneme-mcp
+```
+
+For client-specific configs, see [OpenClaw &amp; Hermes](/guides/openclaw-hermes/).

@@ -1,0 +1,98 @@
+---
+title: Architecture
+description: The append-only event log, materialized views, and the trait seams that keep mneme's providers swappable.
+---
+
+import { Aside, CardGrid, Card } from '@astrojs/starlight/components';
+
+mneme has one organizing idea: **the event log is the single system of record,
+and everything else is a materialized view of it.** Get that, and the rest of
+the system follows.
+
+## The event log (system of record)
+
+Every write is an immutable, append-only `Event` on a fjall-backed log
+(`FjallEventLog`). Memories, evolutions, invalidations, link updates, outcomes,
+learning-curve points — all of it is events. The log is never mutated and never
+overwritten; a "change" is a new event that supersedes an old one.
+
+<Aside type="tip" title="Why this matters">
+Because the log is append-only and complete, **every index is rebuildable by
+replaying it.** That single property is what makes the frontier features
+possible: counterfactual replay (Phase 10), time-travel provenance (Phase 15),
+and KV cartridges as just-another-view (Phase 12).
+</Aside>
+
+## Materialized views
+
+A view is anything that folds the event tail into a queryable structure. Each
+implements the `MaterializedView` trait (`apply(&entry)`), so it can be driven
+off the live tail *or* rebuilt from scratch by replay:
+
+<CardGrid>
+  <Card title="Vector view" icon="seti:default">
+    `hnsw_rs` ANN index over embeddings (mock 32-d for tests, fastembed 384-d
+    for real). Adaptive over-fetch + soft-delete tombstones; multi-tenant
+    partitioning available.
+  </Card>
+  <Card title="BM25 view" icon="document">
+    `tantivy` lexical index with stemming + stop-words and a 4-tier fallback
+    (strict-AND → strict-OR → fuzzy-AND → fuzzy-OR) for typos and locale variants.
+  </Card>
+  <Card title="Graph view" icon="random">
+    Bi-temporal property graph on fjall — nodes, edges, time-travel queries,
+    BFS/shortest-path with bounds. Source nodes render distinctly.
+  </Card>
+  <Card title="Procedural / KV / others" icon="rocket">
+    The procedural artifact store, KV cartridges, probe/causal/exchange state —
+    all materialized views derived from the same log.
+  </Card>
+</CardGrid>
+
+## Hybrid retrieval
+
+`HybridRetriever` fuses the vector and BM25 signals with **Reciprocal Rank
+Fusion**, down-weighting a mock vector signal so lexical results dominate when
+embeddings are stand-ins. Each `Hit` carries an explainable `breakdown` so you
+can see *why* it ranked where it did. A reranker stage and graph-proximity +
+recency/importance signals fold into the fusion.
+
+## The seams (swappable providers)
+
+Every external dependency lives behind a trait, so providers are swappable
+without touching the core:
+
+- `LlmClient` — the model (FakeLlmClient, OllamaLlmClient, …)
+- `Embedder` — embeddings (MockEmbedder, FastEmbedEmbedder)
+- `EventLog` — the log (FjallEventLog)
+- `MaterializedView` — any index
+- `Retriever` — retrieval strategy
+- `Cipher` / `Signer` — crypto (chacha20poly1305 AEAD, ed25519)
+- `KvBackend` — the KV tensor backend (fake, GPT-2, candle/Metal GPU)
+
+## Crate map
+
+```
+mneme-core        types + traits, no I/O — the shared vocabulary
+mneme-store       fjall-backed event log + view plumbing
+mneme-index       hnsw_rs vector + tantivy BM25 + hybrid retriever
+mneme-evolve      A-MEM-style bounded evolution worker
+mneme-procedural  the procedural-memory compiler (the wedge)
+mneme-graph       bi-temporal property graph view
+mneme-extract     ingestion: extract + consolidate facts
+mneme-causal      counterfactual contribution scoring + GC
+mneme-probe       acceptance probes + falsification
+mneme-kv          gated KV cartridges (KV cache as a view)
+mneme-exchange    certified skill import/export
+mneme-dream       negative memory + offline consolidation
+mneme-provenance  time-travel snapshots + provenance chains
+mneme-mcp         MCP server (stdio JSON-RPC)
+mneme-py          pyo3 Python bindings
+mneme-bench       eval-as-product harness
+mneme-server      host process; HTTP API + dashboard
+```
+
+Start reading the source at `mneme-core` — `event.rs` (system of record) and
+`traits.rs` (the seams) define everything else.
+
+Next: [the seven hard rules](/concepts/hard-rules/) that the whole design defends.

@@ -1,0 +1,70 @@
+---
+title: Quickstart (MCP)
+description: Give any MCP-capable agent persistent, self-improving memory in three steps.
+---
+
+import { Steps, Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The fastest way to use mneme is over the **Model Context Protocol**. The
+`mneme-mcp` binary speaks JSON-RPC over stdio and exposes three tools any
+MCP-capable agent can call.
+
+<Steps>
+
+1. **Build the MCP server.**
+
+   ```bash
+   cargo build --release -p mneme-mcp
+   ```
+
+   The binary lands at `target/release/mneme-mcp`.
+
+2. **Register it with your agent.** Add an entry to the client's MCP config,
+   pointing `command` at the built binary:
+
+   ```jsonc
+   {
+     "mcpServers": {
+       "mneme": {
+         "command": "/abs/path/to/mneme/target/release/mneme-mcp",
+         "args": []
+       }
+     }
+   }
+   ```
+
+3. **Restart the client and use the tools.** The agent can now persist and
+   recall memories across sessions.
+
+</Steps>
+
+## The three tools
+
+| Tool | What it does |
+| --- | --- |
+| `mneme_write_memory` | Append a memory to the log (returns its id). |
+| `mneme_search` | Hybrid retrieve the top-k relevant memories for a query. |
+| `mneme_record_outcome` | Record a task outcome that feeds the procedural compiler. |
+
+## Verify the handshake
+
+You can probe the server by hand — it follows MCP protocol version
+`2024-11-05`:
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  | ./target/release/mneme-mcp
+```
+
+You should see an `initialize` result followed by the three tool descriptors.
+
+<Aside type="note">
+This same setup is what powers the [OpenClaw &amp; Hermes guide](/guides/openclaw-hermes/)
+and the live agent-loop eval that took a task suite from **0% to 83%** simply by
+turning memory on. See [Benchmarks](/reference/benchmarks/) for the conditions.
+</Aside>
+
+Next: the full [agent integration guide](/guides/integration/), or learn how the
+substrate works in [Architecture](/concepts/architecture/).

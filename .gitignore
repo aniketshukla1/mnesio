@@ -18,3 +18,9 @@ sdk/node/.last_build_hash
 
 # Downloaded benchmark cache (mneme-bench fetch)
 crates/mneme-bench/data/cache/
+
+# Website (Astro + Starlight) build artifacts
+website/node_modules/
+website/dist/
+website/.astro/
+website/package-lock.json

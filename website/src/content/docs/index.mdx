@@ -1,0 +1,170 @@
+---
+title: mneme
+description: A self-improving long-term memory layer for AI agents — append-only, bi-temporal, erasable, and verifiably better over time.
+template: splash
+hero:
+  tagline: A memory that gets verifiably better — that can prove what it knew and when, and can take it back.
+  image:
+    file: ../../assets/logo.svg
+  actions:
+    - text: Get started
+      link: /start/getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: Why mneme
+      link: /start/why/
+      icon: open-book
+      variant: minimal
+    - text: View on GitHub
+      link: https://github.com/your-org/mneme
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard, LinkButton, Aside, Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+
+<div class="lead">
+
+Most agent-memory systems are *storage-shaped*: they remember facts.
+**mneme** is a Rust-native memory layer with a different bet — the agent gets
+**better at doing things** over time, behind a safety gate that no
+self-improvement can bypass. Every belief traces to its source events, every
+version is kept, and a forgotten subject can be made cryptographically
+unreadable while the log stays append-only.
+
+</div>
+
+<div class="metric-grid">
+  <div class="metric">
+    <div class="num">98.1%</div>
+    <div class="label">Retrieval recall</div>
+    <div class="sub">SQuAD, hybrid HNSW + BM25 + RRF</div>
+  </div>
+  <div class="metric">
+    <div class="num">4.11&nbsp;ms</div>
+    <div class="label">Query latency p99</div>
+    <div class="sub">at 105k memories indexed</div>
+  </div>
+  <div class="metric">
+    <div class="num">0 → 83%</div>
+    <div class="label">Agent task accuracy</div>
+    <div class="sub">live LLM agent, memory off → on</div>
+  </div>
+  <div class="metric">
+    <div class="num">1577×</div>
+    <div class="label">KV cartridge speedup</div>
+    <div class="sub">GPU bf16 vs CPU f32, 1.5B model</div>
+  </div>
+</div>
+
+<div class="honesty">
+
+**Honest numbers only.** Every figure on this site is measured by the harness in
+`mneme-bench` and reproduced in the [Benchmarks](/reference/benchmarks/) page
+with its exact conditions. We caveat what's a stand-in and never publish a number
+we can't rerun.
+
+</div>
+
+<h2 class="section-title">The wedge: self-improvement behind a gate</h2>
+<p class="section-sub">Two loops the storage-shaped competitors don't have.</p>
+
+<CardGrid>
+  <Card title="Procedural compiler" icon="rocket">
+    Batches of agent **outcomes** are compiled into improved, versioned
+    **policy artifacts** (system prompts, heuristics, skills) via a GEPA-style
+    loop: reflect → propose K → shadow-evaluate → Pareto-select → **gated
+    commit**. Nothing commits without passing the eval gate.
+  </Card>
+  <Card title="Memory evolution" icon="random">
+    When a memory is written, a bounded async worker retroactively re-tags and
+    re-links related memories (A-MEM style) — so the knowledge graph the
+    compiler learns from stays adaptive, without unbounded cascades.
+  </Card>
+  <Card title="The non-bypassable gate" icon="approve-check">
+    `EvalReport::is_committable()` = canaries pass + safety probe holds +
+    non-negative objective delta. A canary-breaking change is **rejected** —
+    no "temporary" bypass, ever. This is the regression guard the literature omits.
+  </Card>
+  <Card title="Replayable substrate" icon="seti:db">
+    The append-only event log is the single system of record. Every index —
+    vector, BM25, graph, procedural, KV — is a materialized view rebuildable by
+    replaying events. That replayability is what makes the frontier bets possible.
+  </Card>
+</CardGrid>
+
+<h2 class="section-title">Three promises, made literal</h2>
+<p class="section-sub">mneme is not a place to put facts.</p>
+
+<CardGrid>
+  <Card title="Verifiably better" icon="bars">
+    A positive learning curve on an agent suite — with **no safety-probe
+    regression**, gated commit by gated commit. Causal credit assignment
+    (Phase 10) scores each memory's *counterfactual* contribution by replaying
+    outcomes with it masked.
+  </Card>
+  <Card title="Prove what it knew" icon="open-book">
+    Bi-temporal versioning + an append-only log means
+    `snapshot_as_of(T)` reconstructs the live set "as the agent knew it" at any
+    past T, and `provenance(memory)` traces every belief to its source events
+    and supersessions. A black-box recorder for agent memory.
+  </Card>
+  <Card title="Take it back" icon="trash">
+    PII redaction before storage + crypto-shred "forget" (drop the per-subject
+    key) reconciles the append-only log with the right to erasure: the subject
+    becomes unreadable in live reads *and* historical replays, while the log
+    stays append-only and `entry_count` is unchanged.
+  </Card>
+</CardGrid>
+
+<h2 class="section-title">Drop it into your agent in minutes</h2>
+
+<Tabs>
+  <TabItem label="MCP (any client)">
+```jsonc
+// Claude Desktop / OpenClaw / Hermes — add to your MCP config
+{
+  "mcpServers": {
+    "mneme": {
+      "command": "/path/to/mneme/target/release/mneme-mcp",
+      "args": []
+    }
+  }
+}
+```
+Tools exposed: `mneme_write_memory`, `mneme_search`, `mneme_record_outcome`.
+  </TabItem>
+  <TabItem label="Rust">
+```rust
+use mneme_store::FjallEventLog;
+use mneme_core::EventLog;
+
+let log = FjallEventLog::open("./mneme-data")?;
+// Writes are events on an append-only log; indexes are materialized views.
+log.append(event).await?;
+```
+  </TabItem>
+  <TabItem label="Python">
+```python
+from mneme import Client
+
+client = Client("./mneme-data")
+client.write("Alice was promoted to Staff Engineer in March 2024")
+hits = client.search("what is Alice's role?", k=5)
+```
+  </TabItem>
+</Tabs>
+
+<div style="text-align:center; margin-top: 2rem;">
+  <LinkButton href="/start/getting-started/" icon="right-arrow">Build it from source</LinkButton>
+  <LinkButton href="/start/quickstart/" variant="secondary" icon="puzzle">Quickstart (MCP)</LinkButton>
+</div>
+
+<h2 class="section-title">Go deeper</h2>
+
+<CardGrid>
+  <LinkCard title="Architecture" description="The event log, materialized views, and the seams that keep providers swappable." href="/concepts/architecture/" />
+  <LinkCard title="The seven hard rules" description="The invariants that make the frontier bets safe — and what mneme will never do." href="/concepts/hard-rules/" />
+  <LinkCard title="Benchmarks" description="Every published number, with the exact conditions to reproduce it." href="/reference/benchmarks/" />
+  <LinkCard title="Roadmap" description="Phases 0–15: from foundation to regulator-grade provenance." href="/reference/roadmap/" />
+</CardGrid>

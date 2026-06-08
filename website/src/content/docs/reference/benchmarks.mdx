@@ -1,0 +1,104 @@
+---
+title: Benchmarks
+description: Every published mneme number, with the exact conditions to reproduce it. No fabricated figures.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This page lists every number mneme publishes, with the conditions under which it
+was measured. The harness that produces them lives in `mneme-bench`. Anything
+that comes from a deterministic stand-in is labelled as such and is **not** a
+number we headline.
+
+<Aside type="tip" title="The eval harness is the product">
+mneme treats evaluation as a first-class deliverable, not an afterthought. The
+goal isn't a leaderboard screenshot — it's a harness you can rerun to verify
+every claim on this site.
+</Aside>
+
+## Retrieval quality
+
+| Metric | Value | Conditions |
+| --- | --- | --- |
+| Recall (SQuAD) | **98.1%** | Hybrid HNSW + BM25 + RRF, fastembed 384-d, top-k retrieval over the SQuAD corpus |
+| Recall@k at scale | **100%** | 105k synthetic memories indexed; recall@k of the planted gold memory |
+
+Retrieval is mneme's strongest, most-reproducible result: the hybrid pipeline
+finds the right memory essentially every time. This is the foundation the QA
+numbers build on — when QA accuracy is lower, the bottleneck is the *answerer
+model*, not retrieval.
+
+## Scale &amp; latency
+
+Measured at **105,000 memories** indexed:
+
+| Metric | Value |
+| --- | --- |
+| Append latency p50 | **~0.0017 ms** |
+| Query latency p99 | **4.11 ms** |
+| Recall@k | **100%** |
+
+The append path stays far under the &lt;5ms target ([Hard Rule #5](/concepts/hard-rules/))
+because embedding and evolution are async behind bounded queues — a write never
+blocks on an LLM call.
+
+## Agent task accuracy
+
+A real LLM-driven agent loop over the live `mneme-mcp` stdio server
+(`examples/agent_loop_eval.py`, Ollama-driven, 6 private-fact questions):
+
+| Memory | Score |
+| --- | --- |
+| Off | **0 / 6 (0%)** |
+| On | **5 / 6 (83%)** |
+
+This isolates the *mechanism*: the same agent, same questions, memory toggled.
+Turning mneme on takes a task it cannot do to one it mostly can. It is a small,
+reproducible demonstration — not a leaderboard ranking.
+
+## QA accuracy (LLM-judged)
+
+QA accuracy needs a model in the loop for both answering and judging. With a
+**local** model (Ollama) over a SQuAD-100 slice:
+
+| Suite | Model | Accuracy |
+| --- | --- | --- |
+| SQuAD-100 | local (Ollama) | **66%** |
+
+<Aside type="caution" title="On LOCOMO">
+LOCOMO is a hard long-conversation QA benchmark. We have a real loader and runner
+for the full splits, but a headline LOCOMO score is gated on a frontier-class
+answerer model (the local 3B/7B models are the ceiling, not mneme's retrieval —
+which scores 98.1% recall). We will publish a LOCOMO number only when it's
+produced by a model we can stand behind, with the standard LLM judge. We do not
+publish a number we can't reproduce.
+</Aside>
+
+## KV cartridge speedups (GPU)
+
+From the candle/Metal GPU path (see [KV cartridges](/guides/kv-cartridges/)):
+
+| Configuration | Speedup | Baseline |
+| --- | --- | --- |
+| GPU KV (general) | **107×** | text-context retrieval |
+| GPU bf16, 1.5B model | **1577×** | CPU f32 |
+| q8 quantized | **4×** | f32 cartridge |
+
+bf16 (not f16) plus a mixed-precision f32-accumulation residual is what keeps
+deep-model accuracy intact at these speedups.
+
+## How to reproduce
+
+```bash
+# retrieval recall + QA accuracy
+cargo run --release -p mneme-bench -- qaeval --dataset squad --rows 100
+
+# scale / latency at 105k
+cargo run --release -p mneme-bench -- scale --n 105000
+
+# agent loop (needs a running Ollama)
+python examples/agent_loop_eval.py
+```
+
+Numbers on this site are kept in sync with `BENCHMARKS.md` in the repo. If a
+figure here ever disagrees with a fresh run, the fresh run wins — file an issue.

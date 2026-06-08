@@ -1,0 +1,143 @@
+/* mneme — Starlight theme overrides.
+   Accent: teal→indigo, matching the logo gradient. Dark-first. */
+
+:root {
+  --sl-color-accent-low: #11243a;
+  --sl-color-accent: #2dd4bf;
+  --sl-color-accent-high: #99f6e4;
+
+  --sl-color-white: #f8fafc;
+  --sl-color-gray-1: #e2e8f0;
+  --sl-color-gray-2: #b6c2d2;
+  --sl-color-gray-3: #8190a3;
+  --sl-color-gray-4: #475569;
+  --sl-color-gray-5: #1e293b;
+  --sl-color-gray-6: #121a2a;
+  --sl-color-black: #0b1120;
+
+  --sl-font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Light theme — keep the accent readable on white. */
+:root[data-theme="light"] {
+  --sl-color-accent-low: #c7f5ee;
+  --sl-color-accent: #0d9488;
+  --sl-color-accent-high: #134e4a;
+}
+
+/* ---------- Hero (splash landing) ---------- */
+.hero {
+  padding-block: 2rem;
+}
+.hero h1 {
+  font-size: clamp(2.6rem, 7vw, 4.2rem);
+  line-height: 1.04;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  background: linear-gradient(120deg, #99f6e4 0%, #818cf8 60%, #c4b5fd 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.hero .tagline {
+  font-size: clamp(1.05rem, 2.4vw, 1.35rem);
+  color: var(--sl-color-gray-2);
+  max-width: 46ch;
+}
+.hero img {
+  filter: drop-shadow(0 0 28px rgba(45, 212, 191, 0.35));
+}
+
+/* The primary CTA gets the gradient fill. */
+.hero .actions a[data-variant="primary"] {
+  background: linear-gradient(120deg, #2dd4bf, #6366f1);
+  border: none;
+  color: #06121f;
+  font-weight: 700;
+}
+.hero .actions a[data-variant="primary"]:hover {
+  filter: brightness(1.08);
+}
+
+/* ---------- Landing building blocks ---------- */
+.lead {
+  font-size: 1.15rem;
+  color: var(--sl-color-gray-2);
+  max-width: 70ch;
+  margin-inline: auto;
+  text-align: center;
+}
+
+/* Inner markdown paragraphs sit flush inside the styled wrappers. */
+.lead > :first-child,
+.honesty > :first-child {
+  margin-top: 0;
+}
+.lead > :last-child,
+.honesty > :last-child {
+  margin-bottom: 0;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 1rem;
+  margin-block: 2rem;
+}
+.metric {
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 14px;
+  padding: 1.25rem 1.1rem;
+  background:
+    radial-gradient(120% 120% at 0% 0%, rgba(45, 212, 191, 0.08), transparent 60%),
+    var(--sl-color-gray-6);
+}
+.metric .num {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: linear-gradient(120deg, #2dd4bf, #818cf8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.metric .label {
+  font-size: 0.9rem;
+  color: var(--sl-color-gray-2);
+  margin-top: 0.3rem;
+}
+.metric .sub {
+  font-size: 0.78rem;
+  color: var(--sl-color-gray-3);
+  margin-top: 0.35rem;
+}
+
+/* Feature cards reuse Starlight's <CardGrid>; nudge the border accent. */
+.card {
+  border-color: var(--sl-color-gray-5) !important;
+}
+
+.section-title {
+  text-align: center;
+  font-size: 1.9rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin-top: 3.5rem;
+}
+.section-sub {
+  text-align: center;
+  color: var(--sl-color-gray-3);
+  margin-top: -0.4rem;
+  margin-bottom: 1.5rem;
+}
+
+/* Honesty note — every published number is caveated, never inflated. */
+.honesty {
+  border: 1px dashed var(--sl-color-gray-4);
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  color: var(--sl-color-gray-2);
+  font-size: 0.92rem;
+  background: rgba(99, 102, 241, 0.06);
+}

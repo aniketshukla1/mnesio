@@ -1,0 +1,71 @@
+---
+title: The seven hard rules
+description: The invariants that make mneme safe to self-improve — and that a storage-shaped competitor can't bolt on.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+These seven rules are non-negotiable. They are enforced in code, defended by
+tests, and every feature — including the frontier bets — is built to obey them.
+They are also the reason mneme can do things a mutable-row system can't safely do.
+
+## 1. Nothing procedural commits without passing the gate
+
+`EvalReport::is_committable()` requires **canaries pass + safety probe holds +
+non-negative objective delta**. This is the regression guard the literature
+(LangMem) omits. No exceptions, no "temporary" bypass. A canary-breaking change
+is rejected — even an anti-memory suppression rule that would blind the agent.
+
+<Aside type="caution">
+This is the single most important rule. Self-improvement without a
+non-bypassable gate is the **Alignment Tipping Process** — gradual drift off the
+guardrails. The gate is what makes "verifiably better" mean *verifiably*.
+</Aside>
+
+## 2. Never overwrite history
+
+A memory update *invalidates and creates a new bi-temporal version* — a `parent`
+pointer plus a new `BiTemporal` stamp. The event log is append-only and
+immutable. Evolution, falsification, contradiction-driven supersession, KV
+versioning, and skill versioning all follow the same canonical triple: write a
+new version, point it at its parent, invalidate the old. The past is preserved.
+
+## 3. Scope is a security boundary
+
+Procedural learning and evolution must never cross a `Scope` without an explicit
+aggregation/anonymization step. `Scope::contains` gates every cross-entity read.
+A tenant's memories never leak into another's learning.
+
+## 4. The event log is the single system of record
+
+Every index — vector, BM25, graph, procedural, KV — is a materialized view that
+must be rebuildable by replaying events. No view may hold state that isn't
+derivable from the log. (This is also why belief *confidence* is derived on read,
+never persisted.)
+
+## 5. The write path stays fast (&lt;5ms target)
+
+Embedding, evolution, and knowledge-graph extraction are async, behind bounded
+queues. A write never blocks on an LLM call. Counterfactual replay, dreaming, and
+consolidation all run **offline**, never on the write path.
+
+## 6. Bound the cascades
+
+Evolution respects `EvolveConfig` caps — `max_evolve_per_write`, cooldown,
+lifetime limit. A-MEM has no convergence guarantee; these bounds are what replace
+it. Dreaming and consolidation are likewise bounded and offline.
+
+## 7. Keep every external dependency behind a trait
+
+`LlmClient`, `Embedder`, `EventLog`, `MaterializedView`, `Retriever`, `Cipher`,
+`Signer`, `KvBackend` — providers are swappable. The core never depends on a
+concrete vendor.
+
+---
+
+Together these rules are the moat. Each frontier capability is only *safe*
+because of them: causal GC prunes only by **provable** zero contribution (not a
+time-decay guess), self-falsifying memory supersedes via the canonical triple
+(history kept), and crypto-shred erasure reconciles forgetting with an
+append-only log. See [the roadmap](/reference/roadmap/) for how each phase
+honors all seven.

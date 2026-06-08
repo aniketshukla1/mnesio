@@ -1,0 +1,80 @@
+---
+title: The procedural wedge
+description: How mneme compiles agent outcomes into improved, versioned policy artifacts behind a non-bypassable safety gate.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+The wedge is the part of mneme that has no equivalent in storage-shaped memory
+systems: the agent doesn't just remember *facts*, it compiles its own *behavior*
+into something measurably better — and the only way that better thing ships is by
+passing an eval gate.
+
+## The procedural-memory compiler
+
+The primary loop (`mneme-procedural`) turns batches of agent `Outcome`s into
+improved, versioned `PolicyArtifact`s — system prompts, heuristics, skills, and
+retrieval rules. It's a GEPA-style reflective loop:
+
+<Steps>
+
+1. **Reflect.** Read a batch of outcomes; diagnose what went wrong and why.
+
+2. **Propose K candidates.** Generate K improved artifact variants from the
+   reflection.
+
+3. **Shadow-evaluate.** Run each candidate against an `EvalSuite` of benchmark
+   tasks plus canaries and a safety probe, producing an `EvalReport`.
+
+4. **Pareto-select.** Pick the winner on the Pareto front of objective score vs.
+   safety — never trading a probe regression for a higher score.
+
+5. **Gated commit.** Only if `EvalReport::is_committable()` holds does the winner
+   become the new active version, via an **atomic hot-swap** of the active-version
+   pointer. Otherwise it's rejected and logged.
+
+</Steps>
+
+<Aside type="caution" title="The gate is the point">
+A candidate that scores higher but breaks a canary or drops the safety probe is
+**rejected**. This is [Hard Rule #1](/concepts/hard-rules/), and it's what the
+literature omits. "Verifiably better" requires a verifier that can say no.
+</Aside>
+
+Credit assignment is multi-prompt: when several prompts contribute to an outcome,
+the compiler attributes the delta across them rather than crediting one blindly.
+
+### The "done when" bar
+
+Phase 2 is only considered done when there's a **positive learning curve on an
+ALFWorld-style suite with no safety-probe regression** — a real curve, dashboarded
+live, not a claim.
+
+## Memory evolution (the supporting loop)
+
+When a memory is written, a bounded async worker runs three A-MEM-style LLM
+steps to retroactively re-tag and re-link related memories — keeping the
+knowledge graph the compiler learns from adaptive. It is:
+
+- **Async** — never on the write path (Hard Rule #5).
+- **Bounded** — `EvolveConfig` caps `max_evolve_per_write`, cooldown, and a
+  lifetime limit (Hard Rule #6). A-MEM has no convergence guarantee; the bounds
+  replace it.
+- **Non-destructive** — every evolution invalidates-and-supersedes with a
+  `parent` pointer; history is kept (Hard Rule #2).
+
+## Beyond the base loop
+
+The wedge extends into the frontier phases, all behind the same gate:
+
+- **Causal credit assignment** (Phase 10) scores each memory's *counterfactual*
+  contribution by replaying outcome evaluation with it masked, then GCs by
+  provable zero contribution.
+- **Self-falsifying memory** (Phase 11) re-runs acceptance probes and, on
+  `Refuted`, auto-supersedes the memory with no human in the loop.
+- **Negative memory + dreaming** (Phase 14) compiles bad outcomes into gated
+  suppression rules and runs bounded offline consolidation that prunes provable
+  dead weight and re-anchors drifted notes.
+
+Next: see the measured results in [Benchmarks](/reference/benchmarks/), or the
+full sequence in [the roadmap](/reference/roadmap/).

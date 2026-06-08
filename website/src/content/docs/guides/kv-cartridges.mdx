@@ -1,0 +1,77 @@
+---
+title: KV cartridges (GPU)
+description: Treat the KV cache as a materialized view of the log — precompute attention state once, answer many times.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+A **KV cartridge** is one of mneme's frontier bets (Phase 12): instead of
+re-reading a long memory context through the model on every query, you compile
+the relevant memories' attention key/value state **once** into a cartridge, then
+reuse it. The cartridge is *just another materialized view of the log* — keyed
+and rebuildable by replay, like every other index.
+
+<Aside type="caution" title="Status: substrate done, real tensor backend in progress">
+The cartridge **substrate** — keying, versioning, the gate-before-activation, and
+crypto-shred-by-recompile — is complete and tested. The default tensor backend is
+a `FakeKvBackend`; a real open-weights KV backend behind the same `KvBackend`
+trait is the remaining lift. The GPU numbers below come from the real candle/Metal
+path that is wired in; treat them as the measured speedups they are, not as a
+finished product claim.
+</Aside>
+
+## How it's keyed
+
+A cartridge is identified by a `CartridgeKey` of
+`(model_id, quant, rope_config, log_head)`. Because it's pinned to a `log_head`,
+it's reconstructible by replaying the log up to that point — satisfying
+[Hard Rule #4](/concepts/hard-rules/) (every view is a function of the log).
+
+## The lifecycle
+
+<Steps>
+
+1. **Compile.** `compile()` opens key-sealed memories, hands the surviving
+   plaintext to a `KvBackend`, and produces a cartridge blob.
+
+2. **Gate.** `CartridgeStore::activate` only serves a cartridge that passes
+   `is_committable()` — the same safety gate as everything else
+   ([Hard Rule #1](/concepts/hard-rules/)). A cartridge that doesn't hold
+   accuracy is not activated.
+
+3. **Version, never mutate.** New cartridges supersede old ones; they're never
+   edited in place ([Hard Rule #2](/concepts/hard-rules/)).
+
+4. **Erase by recompile.** Crypto-shred a subject's key, recompile, and the
+   rebuilt blob can't reconstruct the erased content — reconciling KV memory with
+   the right to be forgotten on an append-only log.
+
+</Steps>
+
+## Measured speedups
+
+These are real numbers from the candle/Metal GPU path, reported with their
+conditions. See [Benchmarks](/reference/benchmarks/) for the full table.
+
+| Configuration | Speedup | vs. baseline |
+| --- | --- | --- |
+| GPU KV (general) | **107×** | text-context retrieval |
+| GPU bf16, 1.5B model | **1577×** | CPU f32 |
+| q8 quantized | **4×** | f32 cartridge |
+
+<Aside type="note" title="Why bf16, not f16, for deep models">
+f16 has a narrow exponent range; deep models overflow it in the residual stream.
+mneme's GPU path uses **bf16** for deep models and a **mixed-precision residual**
+(f32 accumulation) so accuracy holds. That's why the headline 1.5B speedup is
+quoted as bf16-vs-cpu-f32 — it's the configuration that actually preserves quality.
+</Aside>
+
+## Selecting a model + precision at runtime
+
+The server exposes the active KV configuration (model + precision) at
+`GET /api/kv/metrics`, with a dashboard panel for it. The backend is swappable
+behind the `KvBackend` trait — fake, GPT-2 generative, or the candle/Metal GPU
+path — without touching the cartridge substrate.
+
+Next: the full numbers in [Benchmarks](/reference/benchmarks/), or where this sits
+in the plan in [the roadmap](/reference/roadmap/).

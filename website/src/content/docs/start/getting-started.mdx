@@ -1,0 +1,93 @@
+---
+title: Getting started
+description: Build mneme from source, run the server, and open the dashboard.
+---
+
+import { Steps, Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+mneme is a Rust workspace. You build it from source today; published crates and
+prebuilt binaries are on the roadmap.
+
+## Prerequisites
+
+- **Rust** (stable, 1.75+) — install via [rustup](https://rustup.rs).
+- A C toolchain (for native dependencies like `tantivy` and `hnsw_rs`).
+- Optional: **Ollama** for local-LLM evaluation; a **Metal/CUDA GPU** for KV
+  cartridges; **Python 3.9+** + `maturin` for the Python bindings.
+
+## Build
+
+<Steps>
+
+1. Clone and build the workspace:
+
+   ```bash
+   git clone https://github.com/your-org/mneme.git
+   cd mneme
+   cargo build --release
+   ```
+
+2. Run the test suite to confirm everything is green:
+
+   ```bash
+   cargo test
+   ```
+
+3. Lint exactly as CI does (this must pass before any commit):
+
+   ```bash
+   cargo fmt --check
+   cargo clippy -- -D warnings
+   ```
+
+</Steps>
+
+## Run the server + dashboard
+
+The host process (`mneme-server`) exposes an HTTP API and a live dashboard.
+
+```bash
+cargo run --release -p mneme-server
+```
+
+Then open the dashboard at `http://localhost:3000` (default). It surfaces the
+live panels for retrieval metrics, memory evolution, the procedural learning
+curve, and each frontier phase (causal, probe, KV, exchange, dream, provenance).
+
+<Aside type="tip">
+Set `MNEME_PROCEDURAL=1` to spawn the procedural compiler worker, and point the
+LLM-backed features at a running Ollama with the `ollama` feature. The default
+build uses deterministic stand-ins so everything runs offline.
+</Aside>
+
+## Storage layout
+
+mneme persists to a single append-only event log (fjall-backed) plus its
+materialized views. By default it lives under `./mneme-data`. Because the log is
+the single system of record, **every index is rebuildable by replaying events** —
+deleting a view directory and restarting reconstructs it.
+
+## Optional: feature flags
+
+<Tabs>
+  <TabItem label="Real embeddings">
+```bash
+# fastembed (384-d) instead of the mock embedder
+cargo run --release -p mneme-server --features fastembed
+```
+  </TabItem>
+  <TabItem label="Local LLM">
+```bash
+# route evolution / procedural / qaeval through Ollama
+cargo run --release -p mneme-server --features ollama
+```
+  </TabItem>
+  <TabItem label="GPU KV">
+```bash
+# candle/Metal GPU backend for KV cartridges
+cargo run --release -p mneme-server --features kv-gpu
+```
+  </TabItem>
+</Tabs>
+
+Next: wire it into an agent with the [MCP quickstart](/start/quickstart/).

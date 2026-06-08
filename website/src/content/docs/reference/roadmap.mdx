@@ -1,0 +1,87 @@
+---
+title: Roadmap
+description: The full build sequence — Phases 0–15, from foundation to regulator-grade provenance. Each phase has a hard "done when".
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+mneme is built in strict sequence: each phase has a hard "done when" criterion,
+and every commit obeys [the seven hard rules](/concepts/hard-rules/). The legend:
+**✅ done**, **◑ substrate done / one lift remaining**.
+
+<Aside type="note">
+Phases 0–9 reached parity-plus-wedge. Phases 10–15 are the *unique* bets — each
+only possible (or only *safe*) because of mneme's substrate: append-only +
+replayable + bi-temporal + the non-bypassable gate.
+</Aside>
+
+## Foundation &amp; the wedge (0–6)
+
+| Phase | What | Status |
+| --- | --- | --- |
+| 0 | Foundation — event log, vector + BM25 views, hybrid retriever with explainable breakdown | ✅ |
+| 1 | Memory evolution — A-MEM three steps, async + bounded + bi-temporal | ✅ |
+| 2 | **Procedural compiler (the wedge)** — versioned artifacts, GEPA-style loop, gated commit | ✅ |
+| 3 | Custom filtered HNSW — adaptive over-fetch, soft-delete, multi-tenant | ✅ |
+| 4 | Bi-temporal property graph view on fjall | ✅ |
+| 5 | pyo3 Python bindings + MCP server | ✅ |
+| 6 | Eval harness as a first-class product | ✅ |
+
+## Parity gaps + amplifying the wedge (7–9)
+
+| Phase | What | Status |
+| --- | --- | --- |
+| 7 | Ingestion intelligence — extract atomic facts, consolidate ADD/UPDATE/NOOP, importance + decay | ✅ |
+| 8 | Retrieval + personalization + privacy — graph/recency fusion, reranker, persona memory, multi-agent ACLs, PII redaction + crypto-shred | ✅ |
+| 9 | Skill reuse + distribution — retrieve committed skills at query time, Node/TS SDK + adapters | ✅ |
+
+## Frontier bets (10–15)
+
+The bets a storage-shaped competitor would have to rebuild its foundation to copy.
+
+### Phase 10 — Causal memory ✅
+Exploit the replayable log for **counterfactual credit assignment**: re-run
+outcome evaluation with a memory masked, measure the delta, and GC by *provable*
+zero contribution instead of a time-decay guess. Offline, bounded, never on the
+write path.
+
+### Phase 11 — Self-falsifying memory ✅
+Re-checkable acceptance probes (`Held | Refuted | Inconclusive`); on `Refuted`,
+the memory auto-supersedes via the canonical triple (history kept), no human in
+the loop. Belief confidence is *derived* on read, never persisted.
+
+### Phase 12 — Gated KV cartridges ◑
+A KV cartridge is just another materialized view of the log, keyed by
+`(model_id, quant, rope_config, log_head)` and rebuildable by replay. The
+substrate — versioning, gate-before-activation, audit, erasure-by-recompile — is
+**done**; a real open-weights KV tensor backend behind the `KvBackend` trait is
+the one remaining lift. See [KV cartridges](/guides/kv-cartridges/).
+
+### Phase 13 — Certified skill exchange ✅
+A gated artifact is a portable unit of *certified competence*. `export` wraps it
+with a canary suite + issuer report into a signed certificate; `import` is *trust
+but verify* — verify the signature, **re-run the canaries locally**, then apply
+the importer's own gate. The shipped report is never trusted in the decision.
+
+### Phase 14 — Negative memory + dreaming ✅
+*Anti-memory*: a bad outcome compiles into a gated suppression rule — committed
+only if its re-eval still passes the gate (a canary-breaking suppression is
+refused, so anti-memory can't blind the agent). *Dreaming*: a bounded offline
+pass prunes provable dead/harmful weight and re-anchors drifted notes to their
+parent.
+
+### Phase 15 — Regulator-grade provenance ✅
+A read-path capability over the append-only + bi-temporal log:
+`snapshot_as_of(T)` reconstructs the live set as the agent knew it at any past
+`T`; `provenance(memory)` traces every belief to its source events and
+supersessions; a redaction policy applies a crypto-shred uniformly across all
+`T` — live reads and historical replays alike — while the log stays append-only.
+
+<Aside type="tip" title="The frontier is complete">
+All of Phases 10–15 are shipped behind the seven hard rules, each with a live
+"done when". Phase 12 is ◑ (substrate done; the real open-weights KV tensor
+backend is the remaining lift). Everything else is ✅.
+</Aside>
+
+See [`COMPETITIVE.md`](https://github.com/your-org/mneme) in the repo for the
+per-competitor "why they can't copy this" breakdown.

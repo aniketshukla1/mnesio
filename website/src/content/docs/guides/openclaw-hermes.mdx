@@ -1,0 +1,90 @@
+---
+title: OpenClaw & Hermes
+description: Drop-in MCP configs for the OpenClaw and Hermes agent runtimes, plus a skill snippet.
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+OpenClaw and Hermes both speak MCP, so mneme plugs in the same way it does for
+any MCP client: point the runtime at the `mneme-mcp` binary. Ready-to-copy
+configs live in the repo under `examples/integrations/`.
+
+<Aside type="note">
+These are configuration snippets you add to your own OpenClaw/Hermes install.
+mneme runs the MCP server as a subprocess of the agent runtime — there's nothing
+to host separately.
+</Aside>
+
+## Build the binary
+
+```bash
+cargo build --release -p mneme-mcp
+# -> target/release/mneme-mcp
+```
+
+## Configure the runtime
+
+<Tabs>
+  <TabItem label="Hermes">
+```jsonc
+// examples/integrations/hermes.mcp.json
+{
+  "mcpServers": {
+    "mneme": {
+      "command": "/abs/path/to/mneme/target/release/mneme-mcp",
+      "args": [],
+      "env": { "MNEME_DATA_DIR": "/abs/path/to/mneme-data" }
+    }
+  }
+}
+```
+  </TabItem>
+  <TabItem label="OpenClaw">
+```jsonc
+// examples/integrations/openclaw.mcp.json
+{
+  "mcpServers": {
+    "mneme": {
+      "command": "/abs/path/to/mneme/target/release/mneme-mcp",
+      "args": [],
+      "env": { "MNEME_DATA_DIR": "/abs/path/to/mneme-data" }
+    }
+  }
+}
+```
+  </TabItem>
+  <TabItem label="OpenClaw skill">
+```jsonc
+// examples/integrations/openclaw.skill.json — teach the agent when to use memory
+{
+  "name": "long-term-memory",
+  "description": "Persist and recall facts across sessions via mneme.",
+  "tools": ["mneme_search", "mneme_write_memory", "mneme_record_outcome"],
+  "guidance": "Search memory before answering anything that may depend on prior context; write salient new facts after each turn."
+}
+```
+  </TabItem>
+</Tabs>
+
+## Verify
+
+After registering, confirm the runtime can see the three tools
+(`mneme_write_memory`, `mneme_search`, `mneme_record_outcome`). You can sanity
+check the server independently:
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  | ./target/release/mneme-mcp
+```
+
+<Aside type="caution" title="On running third-party agents">
+mneme ships the integration *configs and a verified MCP handshake*, not a bundled
+copy of any third-party agent runtime. Install OpenClaw/Hermes yourself from
+their upstream sources and review them before granting tool access — mneme's job
+is to be a safe, well-behaved MCP server, not to vouch for an agent runtime.
+</Aside>
+
+See the [integration guide](/guides/integration/) for the general agent-loop
+pattern and the measured 0% → 83% result.

@@ -1,0 +1,19 @@
+{
+  "name": "mneme-website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Marketing landing page + documentation for mneme.",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.39.3",
+    "astro": "^6.4.4",
+    "remark-gfm": "^4.0.1",
+    "sharp": "^0.34.5"
+  }
+}
