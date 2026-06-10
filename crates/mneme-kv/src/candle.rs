@@ -95,7 +95,17 @@ impl Precision {
     }
 }
 
-/// Architecture dimensions read from a Qwen2 `config.json`.
+/// Architecture dimensions read from a model `config.json`. Despite the name,
+/// this covers the **Qwen2 *and* Llama families** — both are RMSNorm + RoPE +
+/// grouped-query attention + SwiGLU. The only structural difference the loader
+/// cares about is the attention QKV **bias** (present in Qwen2, absent in
+/// Llama), which is loaded optionally (see [`Block`]).
+///
+/// Assumes a **tied** `lm_head` (the embedding matrix doubles as the output
+/// projection — true for Qwen2.5 and Llama-3.2) and standard RoPE.
+// TODO(phase-12): untied `lm_head` checkpoints (Llama-2 / TinyLlama) and RoPE
+// scaling (`rope_scaling`) are not yet handled — load `lm_head.weight` when
+// present, and apply the scaling factor to the RoPE tables.
 #[derive(Debug, Clone)]
 struct QwenConfig {
     hid: usize,
@@ -122,6 +132,24 @@ impl QwenConfig {
     }
 }
 
+/// `eos_token_id` is a single int in Qwen2 configs but an **array** in Llama-3
+/// configs (several end tokens). Accept either — we only need one stop token.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum EosTokenId {
+    One(u32),
+    Many(Vec<u32>),
+}
+
+impl EosTokenId {
+    fn first(&self) -> u32 {
+        match self {
+            EosTokenId::One(x) => *x,
+            EosTokenId::Many(v) => v.first().copied().unwrap_or(0),
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct RawConfig {
     hidden_size: usize,
@@ -132,7 +160,7 @@ struct RawConfig {
     vocab_size: usize,
     rms_norm_eps: f64,
     rope_theta: f64,
-    eos_token_id: u32,
+    eos_token_id: EosTokenId,
 }
 
 impl From<RawConfig> for QwenConfig {
@@ -147,7 +175,7 @@ impl From<RawConfig> for QwenConfig {
             vocab: r.vocab_size,
             eps: r.rms_norm_eps,
             rope_theta: r.rope_theta,
-            eos: r.eos_token_id,
+            eos: r.eos_token_id.first(),
         }
     }
 }
@@ -179,11 +207,12 @@ pub fn device_label(d: &Device) -> &'static str {
 struct Block {
     ln1: Tensor,
     q_w: Tensor,
-    q_b: Tensor,
+    /// Attention QKV biases — present in Qwen2, absent in Llama, hence optional.
+    q_b: Option<Tensor>,
     k_w: Tensor,
-    k_b: Tensor,
+    k_b: Option<Tensor>,
     v_w: Tensor,
-    v_b: Tensor,
+    v_b: Option<Tensor>,
     o_w: Tensor,
     ln2: Tensor,
     gate_w: Tensor,
@@ -287,17 +316,31 @@ impl QwenCandleBackend {
     /// without code changes.
     pub fn load_repo(repo: &str, device: Device, precision: Precision) -> Result<Self> {
         use hf_hub::api::sync::Api;
-        let api = Api::new().map_err(|e| anyhow!("hf-hub init: {e}"))?;
+        let api = Api::new().map_err(|e| {
+            anyhow!(
+                "{}: {e}",
+                crate::cartridge::weights_hint(repo, "model weights")
+            )
+        })?;
         let r = api.model(repo.to_string());
-        let cfg_path = r
-            .get("config.json")
-            .map_err(|e| anyhow!("download config: {e}"))?;
-        let weights = r
-            .get("model.safetensors")
-            .map_err(|e| anyhow!("download weights: {e}"))?;
-        let tok = r
-            .get("tokenizer.json")
-            .map_err(|e| anyhow!("download tokenizer: {e}"))?;
+        let cfg_path = r.get("config.json").map_err(|e| {
+            anyhow!(
+                "{}: {e}",
+                crate::cartridge::weights_hint(repo, "config.json")
+            )
+        })?;
+        let weights = r.get("model.safetensors").map_err(|e| {
+            anyhow!(
+                "{}: {e}",
+                crate::cartridge::weights_hint(repo, "model.safetensors")
+            )
+        })?;
+        let tok = r.get("tokenizer.json").map_err(|e| {
+            anyhow!(
+                "{}: {e}",
+                crate::cartridge::weights_hint(repo, "tokenizer.json")
+            )
+        })?;
 
         let raw: RawConfig = serde_json::from_slice(&std::fs::read(&cfg_path)?)
             .map_err(|e| anyhow!("parse config.json: {e}"))?;
@@ -320,11 +363,11 @@ impl QwenCandleBackend {
             blocks.push(Block {
                 ln1: p.get(cfg.hid, "input_layernorm.weight")?,
                 q_w: attn.get((q_dim, cfg.hid), "q_proj.weight")?,
-                q_b: attn.get(q_dim, "q_proj.bias")?,
+                q_b: attn.get(q_dim, "q_proj.bias").ok(),
                 k_w: attn.get((kv_dim, cfg.hid), "k_proj.weight")?,
-                k_b: attn.get(kv_dim, "k_proj.bias")?,
+                k_b: attn.get(kv_dim, "k_proj.bias").ok(),
                 v_w: attn.get((kv_dim, cfg.hid), "v_proj.weight")?,
-                v_b: attn.get(kv_dim, "v_proj.bias")?,
+                v_b: attn.get(kv_dim, "v_proj.bias").ok(),
                 o_w: attn.get((cfg.hid, q_dim), "o_proj.weight")?,
                 ln2: p.get(cfg.hid, "post_attention_layernorm.weight")?,
                 gate_w: mlp.get((cfg.inter, cfg.hid), "gate_proj.weight")?,
@@ -425,9 +468,9 @@ impl QwenCandleBackend {
             // --- attention --- RMSNorm in f32, then downcast for the matmuls.
             let normed = rms_norm_f32(&h, &blk.ln1, eps)?;
             let nd = cast(&normed, wd)?;
-            let q = linear(&nd, &blk.q_w, Some(&blk.q_b))?;
-            let k = linear(&nd, &blk.k_w, Some(&blk.k_b))?;
-            let v = linear(&nd, &blk.v_w, Some(&blk.v_b))?;
+            let q = linear(&nd, &blk.q_w, blk.q_b.as_ref())?;
+            let k = linear(&nd, &blk.k_w, blk.k_b.as_ref())?;
+            let v = linear(&nd, &blk.v_w, blk.v_b.as_ref())?;
 
             let q = q
                 .reshape((seq, n_head, head_dim))?
@@ -740,6 +783,52 @@ mod tests {
         let got = c.to_dtype(DType::F32).unwrap().to_vec2::<f32>().unwrap();
         assert_eq!(got[0], vec![4.0, 5.0]);
         assert_eq!(got[1], vec![10.0, 11.0]);
+    }
+
+    #[test]
+    fn parses_llama_family_config_with_eos_array() {
+        // A Llama-3-style config.json: `eos_token_id` is an *array*, and there
+        // are no QKV-bias entries in config (bias lives in the weights and is
+        // loaded optionally). No network or weights needed.
+        let json = r#"{
+            "hidden_size": 2048,
+            "num_attention_heads": 32,
+            "num_key_value_heads": 8,
+            "num_hidden_layers": 16,
+            "intermediate_size": 8192,
+            "vocab_size": 128256,
+            "rms_norm_eps": 1e-5,
+            "rope_theta": 500000.0,
+            "eos_token_id": [128001, 128008, 128009]
+        }"#;
+        let raw: RawConfig = serde_json::from_str(json).expect("llama config parses");
+        let cfg = QwenConfig::from(raw);
+        assert_eq!(cfg.hid, 2048);
+        assert_eq!(cfg.head_dim, 64); // 2048 / 32
+        assert_eq!(cfg.n_kv, 8);
+        assert_eq!(cfg.group(), 4); // 32 / 8
+        assert_eq!(cfg.eos, 128001); // first of the array
+    }
+
+    #[test]
+    fn parses_qwen2_config_with_scalar_eos() {
+        // Qwen2.5-0.5B shape: `eos_token_id` is a single int.
+        let json = r#"{
+            "hidden_size": 896,
+            "num_attention_heads": 14,
+            "num_key_value_heads": 2,
+            "num_hidden_layers": 24,
+            "intermediate_size": 4864,
+            "vocab_size": 151936,
+            "rms_norm_eps": 1e-6,
+            "rope_theta": 1000000.0,
+            "eos_token_id": 151645
+        }"#;
+        let raw: RawConfig = serde_json::from_str(json).expect("qwen config parses");
+        let cfg = QwenConfig::from(raw);
+        assert_eq!(cfg.eos, 151645);
+        assert_eq!(cfg.n_head, 14);
+        assert_eq!(cfg.head_dim, 64); // 896 / 14
     }
 
     // Network + ~1GB weights + a real Qwen2 forward → ignored. Run with:

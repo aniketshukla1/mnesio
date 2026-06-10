@@ -38,6 +38,7 @@ pub mod edge;
 #[cfg(feature = "fetch")]
 pub mod fetch;
 pub mod gen;
+pub mod kveval;
 pub mod memeval;
 pub mod qaeval;
 pub mod report;

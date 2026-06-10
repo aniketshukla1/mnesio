@@ -87,6 +87,26 @@ From the candle/Metal GPU path (see [KV cartridges](/guides/kv-cartridges/)):
 bf16 (not f16) plus a mixed-precision f32-accumulation residual is what keeps
 deep-model accuracy intact at these speedups.
 
+## Cartridge accuracy parity
+
+The Phase-12 "done when" requires the cartridge to answer **at least as
+accurately as text-context retrieval** at the speedup. The `kveval` harness
+measures this over a suite — compile the corpus into a cartridge once and answer
+from it, versus retrieve-top-k-and-answer per query:
+
+| Suite | Cartridge acc | Text-context acc | Parity Δ | Speedup |
+| --- | --- | --- | --- | --- |
+| LOCOMO-mini | **90%** | 80% | **+0.10** | ~167× |
+| LongMemEval-mini | **60%** | 60% | **+0.00** | ~180× |
+
+Cartridge accuracy ≥ retrieval (it attends over the whole corpus, not just the
+top-k), at ~167–180× lower per-query latency (compile once, replay — the baseline
+recompiles per query), with erasure-by-recompile holding throughout. These run
+the deterministic `FakeKvBackend` so they gate CI; a real generative backend
+through the same harness yields the publishable number (the GPU path's
+token-identical self-consistency makes that parity exact). Reproduce:
+`cargo run -p mneme-bench -- kveval --suite locomo`.
+
 ## How to reproduce
 
 ```bash

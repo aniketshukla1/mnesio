@@ -101,3 +101,34 @@ jobs:
         run: cargo run -p mneme-bench -- scale --sizes 2000 --embedder mock --min-recall 0.95
       - name: edge — adversarial / hard-rule invariants
         run: cargo run -p mneme-bench -- edge
+      # KV cartridge accuracy-parity (Phase 12 "done when"): the cartridge
+      # answers a suite at least as accurately as per-query text-context
+      # retrieval, and erasure-by-recompile always holds (enforced regardless of
+      # the parity floor). The floor carries a one-question margin because the
+      # text-context baseline's HNSW retrieval has internal randomness; the
+      # cartridge path is deterministic.
+      - name: kveval — KV cartridge parity + erasure (locomo)
+        run: cargo run -p mneme-bench -- kveval --suite locomo --min-parity -0.1
+      - name: kveval — KV cartridge erasure (longmemeval)
+        run: cargo run -p mneme-bench -- kveval --suite longmemeval
+
+  kv-features:
+    name: KV cartridge feature gates (clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: kv-features
+      # The real KV-cartridge backends are feature-gated and fetch model weights
+      # at runtime (their tests are #[ignore]'d). CI can't run them, but it must
+      # keep the code compiling + clippy-clean so the feature-gated paths can't
+      # rot — the default matrix never touches them. clippy/check don't run the
+      # ignored tests, so no weights are downloaded.
+      - name: clippy pretrained + generative + qwen (pure-Rust GPT-2/Qwen2)
+        run: cargo clippy -p mneme-kv --all-targets --features pretrained-kv,generative-kv,qwen-kv -- -D warnings
+      - name: clippy candle GPU backend (CPU build on CI)
+        run: cargo clippy -p mneme-kv --all-targets --features candle-kv -- -D warnings

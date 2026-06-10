@@ -58,6 +58,7 @@ async fn main() -> Result<()> {
         Command::Scale(opts) => cmd_scale(opts).await,
         Command::Compete(opts) => cmd_compete(opts).await,
         Command::QaEval(opts) => cmd_qaeval(opts).await,
+        Command::KvEval(opts) => cmd_kveval(opts).await,
         Command::Edge => cmd_edge().await,
         #[cfg(feature = "fetch")]
         Command::Fetch(opts) => cmd_fetch(opts).await,
@@ -918,6 +919,72 @@ fn write_output(out_path: &Option<std::path::PathBuf>, content: &str) -> Result<
     Ok(())
 }
 
+async fn cmd_kveval(opts: KvEvalOpts) -> Result<()> {
+    let json = match opts.suite.as_str() {
+        "locomo" => LOCOMO_JSON,
+        "longmemeval" => LONGMEMEVAL_JSON,
+        other => bail!("unknown suite {other:?}; expected `locomo` or `longmemeval`"),
+    };
+    let suite = load_memeval_suite(json)?;
+
+    if opts.backend != "fake" {
+        bail!(
+            "backend {:?} is not wired into the CLI — only `fake` (offline) is. Real \
+             backends (generative/qwen/candle) run through \
+             mneme_bench::kveval::run_kveval behind their mneme-kv features.",
+            opts.backend
+        );
+    }
+    let backend = mneme_kv::FakeKvBackend::new("fake-kv");
+    let r = mneme_bench::kveval::run_kveval(&suite, opts.k, &backend, "fake").await?;
+
+    println!(
+        "# KV cartridge accuracy-parity — {} (backend: {})",
+        r.suite_name, r.backend
+    );
+    if !r.is_real() {
+        println!("#   NOTE: `fake` backend → mechanism demonstration, not a published number.");
+    }
+    println!(
+        "#   members={} questions={} k={}",
+        r.member_count, r.total, r.k
+    );
+    println!(
+        "#   cartridge acc    = {:.1}% ({}/{})",
+        r.cartridge_acc() * 100.0,
+        r.cartridge_correct,
+        r.total
+    );
+    println!(
+        "#   text-context acc = {:.1}% ({}/{})",
+        r.textctx_acc() * 100.0,
+        r.textctx_correct,
+        r.total
+    );
+    println!("#   parity delta     = {:+.3}", r.parity_delta());
+    println!(
+        "#   latency/query    = cartridge {:.1}µs vs text-context {:.1}µs → {:.1}× faster",
+        r.cartridge_us_mean,
+        r.textctx_us_mean,
+        r.speedup()
+    );
+    println!("#   erasure-by-recompile holds = {}", r.erasure_ok);
+
+    if !r.erasure_ok {
+        bail!("erasure check failed: the cartridge still answered after its source memory was removed");
+    }
+    if let Some(min) = opts.min_parity {
+        if r.parity_delta() < min {
+            bail!(
+                "parity delta {:+.3} is below the floor {:+.3}",
+                r.parity_delta(),
+                min
+            );
+        }
+    }
+    Ok(())
+}
+
 // ---------------- arg parsing ----------------
 
 enum Command {
@@ -927,9 +994,21 @@ enum Command {
     Scale(ScaleOpts),
     Compete(CompeteOpts),
     QaEval(QaEvalOpts),
+    KvEval(KvEvalOpts),
     Edge,
     #[cfg(feature = "fetch")]
     Fetch(FetchOpts),
+}
+
+/// `kveval` — KV-cartridge accuracy-parity (the Phase-12 "done when").
+struct KvEvalOpts {
+    suite: String,
+    k: usize,
+    /// KV backend: `fake` (default — offline, deterministic, a mechanism demo).
+    backend: String,
+    /// CI gate: fail if the parity delta (cartridge − text-context accuracy)
+    /// is below this floor (0..1). The erasure check must always hold.
+    min_parity: Option<f32>,
 }
 
 struct CompeteOpts {
@@ -1052,6 +1131,10 @@ fn parse_args() -> Result<RootArgs> {
             iter.next();
             "qaeval"
         }
+        Some("kveval") => {
+            iter.next();
+            "kveval"
+        }
         Some("edge") => {
             iter.next();
             "edge"
@@ -1087,6 +1170,9 @@ fn parse_args() -> Result<RootArgs> {
         }),
         "qaeval" => Ok(RootArgs {
             command: Command::QaEval(parse_qaeval(iter)?),
+        }),
+        "kveval" => Ok(RootArgs {
+            command: Command::KvEval(parse_kveval(iter)?),
         }),
         "edge" => {
             // No options beyond --help; reject stray args for consistency.
@@ -1266,6 +1352,31 @@ fn parse_memeval(
             "--out" => opts.out_path = Some(next_value(&mut iter, "--out")?.into()),
             "--min-recall" => {
                 opts.min_recall = Some(next_value(&mut iter, "--min-recall")?.parse()?)
+            }
+            "--help" | "-h" => {
+                print_help();
+                std::process::exit(0);
+            }
+            other => bail!("unknown argument {other:?}; pass --help for usage"),
+        }
+    }
+    Ok(opts)
+}
+
+fn parse_kveval(mut iter: std::iter::Peekable<impl Iterator<Item = String>>) -> Result<KvEvalOpts> {
+    let mut opts = KvEvalOpts {
+        suite: "locomo".into(),
+        k: 5,
+        backend: "fake".into(),
+        min_parity: None,
+    };
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--suite" => opts.suite = next_value(&mut iter, "--suite")?,
+            "--k" => opts.k = next_value(&mut iter, "--k")?.parse()?,
+            "--backend" => opts.backend = next_value(&mut iter, "--backend")?,
+            "--min-parity" => {
+                opts.min_parity = Some(next_value(&mut iter, "--min-parity")?.parse()?)
             }
             "--help" | "-h" => {
                 print_help();

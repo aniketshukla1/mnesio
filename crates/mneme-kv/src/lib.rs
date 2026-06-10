@@ -113,8 +113,8 @@ pub use candle::Precision as CandlePrecision;
 #[cfg(feature = "candle-kv")]
 pub use candle::{QwenCandleBackend, DEFAULT_REPO as CANDLE_DEFAULT_REPO};
 pub use cartridge::{
-    compile, Cartridge, CartridgeKey, CartridgeStatus, CompileError, FakeKvBackend, KvAnswer,
-    KvBackend, SealedMemory,
+    compile, weights_hint, Cartridge, CartridgeKey, CartridgeStatus, CompileError, FakeKvBackend,
+    KvAnswer, KvBackend, SealedMemory,
 };
 #[cfg(feature = "generative-kv")]
 pub use generative::{GenerativeKvBackend, Quant};

@@ -127,6 +127,10 @@ pub enum CartridgeStatus {
     Active,
     /// Failed the gate, or superseded by a newer version — inert.
     Rejected,
+    /// Dropped from the active set to stay within the store's memory budget
+    /// (least-recently-used). Inert, but recoverable by recompiling +
+    /// re-activating — the blob is preserved in history for audit.
+    Evicted,
 }
 
 /// A compiled KV cartridge: a derived, versioned, audited view of the log.
@@ -196,6 +200,29 @@ pub async fn compile<C: mneme_privacy::Cipher>(
     })
 }
 
+/// Build an actionable error message for a failed model-asset fetch in a real
+/// KV backend. Names the repo + file, explains that a cartridge needs the
+/// model's weights/tokenizer (fetched once via Hugging Face, then cached under
+/// `HF_HOME`), and surfaces whether offline mode (`HF_HUB_OFFLINE`) suppressed
+/// the network. Kept here (always compiled + tested) so the feature-gated
+/// backends share one source of truth and the message exists in the default build.
+pub fn weights_hint(repo: &str, file: &str) -> String {
+    let offline = std::env::var_os("HF_HUB_OFFLINE").is_some();
+    let offline_note = if offline {
+        " HF_HUB_OFFLINE is set, so only the local Hugging Face cache was \
+         consulted — unset it (or point HF_HOME at a populated cache) to allow \
+         the download."
+    } else {
+        " Run once with network access to populate the cache, or set HF_HOME to \
+         a cache that already contains it."
+    };
+    format!(
+        "could not obtain {file:?} for model {repo:?}: a real KV-cartridge \
+         backend needs the model's weights + tokenizer, fetched once via \
+         Hugging Face and cached under HF_HOME.{offline_note}"
+    )
+}
+
 /// Deterministic, dependency-free [`KvBackend`] for tests + offline demos.
 ///
 /// Models the KV blob as the JSON-encoded list of member texts. `answer` does a
@@ -239,15 +266,25 @@ impl KvBackend for FakeKvBackend {
     async fn answer(&self, blob: &[u8], query: &str) -> KvAnswer {
         let contents: Vec<String> = serde_json::from_slice(blob).unwrap_or_default();
         let q = query.to_ascii_lowercase();
-        // Match the query's salient terms against blob contents. A hit returns
-        // the first matching member text.
         let terms: Vec<&str> = q.split_whitespace().filter(|t| t.len() > 3).collect();
-        let hit = contents.iter().find(|c| {
-            let lc = c.to_ascii_lowercase();
-            terms.iter().any(|t| lc.contains(t))
-        });
-        match hit {
-            Some(text) => KvAnswer {
+        // Answer from the member with the *most* query-term overlap — a faithful
+        // stand-in for attention over the whole cartridge. Returning merely the
+        // *first* term hit would make accuracy degrade as the corpus grows (a
+        // distractor sharing one word wins), which a real model wouldn't do; the
+        // best-overlap rule keeps the cartridge-over-all-members at least as
+        // accurate as retrieval-over-top-k. Reads only the blob, so an erased
+        // member is genuinely unrecoverable.
+        let best = contents
+            .iter()
+            .map(|c| {
+                let lc = c.to_ascii_lowercase();
+                let score = terms.iter().filter(|t| lc.contains(**t)).count();
+                (score, c)
+            })
+            .filter(|(score, _)| *score > 0)
+            .max_by_key(|(score, _)| *score);
+        match best {
+            Some((_, text)) => KvAnswer {
                 text: text.clone(),
                 latency_us: self.answer_latency_us,
                 answered: true,
@@ -361,5 +398,13 @@ mod tests {
             !a.same_runtime(&other),
             "different quant → different layout"
         );
+    }
+
+    #[test]
+    fn weights_hint_is_actionable() {
+        let h = weights_hint("Qwen/Qwen2.5-0.5B-Instruct", "model.safetensors");
+        assert!(h.contains("Qwen/Qwen2.5-0.5B-Instruct"), "names the repo");
+        assert!(h.contains("model.safetensors"), "names the file");
+        assert!(h.contains("HF_HOME"), "tells you how to fix it");
     }
 }

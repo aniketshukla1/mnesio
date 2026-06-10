@@ -94,14 +94,25 @@ impl PretrainedKvBackend {
     /// call at startup, not on a hot path.
     pub fn load() -> Result<Self> {
         use hf_hub::api::sync::Api;
-        let api = Api::new().map_err(|e| anyhow!("hf-hub init: {e}"))?;
+        let api = Api::new().map_err(|e| {
+            anyhow!(
+                "{}: {e}",
+                crate::cartridge::weights_hint(HF_REPO, "model weights")
+            )
+        })?;
         let repo = api.model(HF_REPO.to_string());
-        let weights_path = repo
-            .get("model.safetensors")
-            .map_err(|e| anyhow!("download weights: {e}"))?;
-        let tok_path = repo
-            .get("tokenizer.json")
-            .map_err(|e| anyhow!("download tokenizer: {e}"))?;
+        let weights_path = repo.get("model.safetensors").map_err(|e| {
+            anyhow!(
+                "{}: {e}",
+                crate::cartridge::weights_hint(HF_REPO, "model.safetensors")
+            )
+        })?;
+        let tok_path = repo.get("tokenizer.json").map_err(|e| {
+            anyhow!(
+                "{}: {e}",
+                crate::cartridge::weights_hint(HF_REPO, "tokenizer.json")
+            )
+        })?;
 
         let buffer = std::fs::read(&weights_path).map_err(|e| anyhow!("read weights: {e}"))?;
         let st =

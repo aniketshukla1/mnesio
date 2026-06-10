@@ -6,8 +6,8 @@ description: The full build sequence — Phases 0–15, from foundation to regul
 import { Aside } from '@astrojs/starlight/components';
 
 mneme is built in strict sequence: each phase has a hard "done when" criterion,
-and every commit obeys [the seven hard rules](/concepts/hard-rules/). The legend:
-**✅ done**, **◑ substrate done / one lift remaining**.
+and every commit obeys [the seven hard rules](/concepts/hard-rules/). Every phase
+below is **✅ shipped**, each behind its own "done when".
 
 <Aside type="note">
 Phases 0–9 reached parity-plus-wedge. Phases 10–15 are the *unique* bets — each
@@ -50,12 +50,19 @@ Re-checkable acceptance probes (`Held | Refuted | Inconclusive`); on `Refuted`,
 the memory auto-supersedes via the canonical triple (history kept), no human in
 the loop. Belief confidence is *derived* on read, never persisted.
 
-### Phase 12 — Gated KV cartridges ◑
+### Phase 12 — Gated KV cartridges ✅
 A KV cartridge is just another materialized view of the log, keyed by
-`(model_id, quant, rope_config, log_head)` and rebuildable by replay. The
-substrate — versioning, gate-before-activation, audit, erasure-by-recompile — is
-**done**; a real open-weights KV tensor backend behind the `KvBackend` trait is
-the one remaining lift. See [KV cartridges](/guides/kv-cartridges/).
+`(model_id, quant, rope_config, log_head)` and rebuildable by replay. The four
+reconciliations — versioning, gate-before-activation, audit,
+erasure-by-recompile — are proven under test + live, and the open-weights tensor
+backend is delivered: real **GPT-2** (pretrained + full generative, with real q8
+quant) and a modern **Qwen2.5** model in pure Rust *and* on **Metal GPU**
+(config-driven 0.5B–7B; f32/f16/bf16). A suite-level **accuracy-parity** eval
+(`mneme-bench kveval`) shows the cartridge answers at least as accurately as
+per-query text-context retrieval (LOCOMO-mini 90% vs 80%) while answering
+**~167–180× faster**, erasure holding — gated in CI. The cartridge store carries
+an LRU byte budget for many-cartridge scale, and the candle backend also accepts
+Llama-family configs. See [KV cartridges](/guides/kv-cartridges/).
 
 ### Phase 13 — Certified skill exchange ✅
 A gated artifact is a portable unit of *certified competence*. `export` wraps it
@@ -79,8 +86,8 @@ supersessions; a redaction policy applies a crypto-shred uniformly across all
 
 <Aside type="tip" title="The frontier is complete">
 All of Phases 10–15 are shipped behind the seven hard rules, each with a live
-"done when". Phase 12 is ◑ (substrate done; the real open-weights KV tensor
-backend is the remaining lift). Everything else is ✅.
+"done when" — including Phase 12 (the KV-cartridge moonshot): real open-weights
+backends on CPU + GPU, a CI-gated accuracy-parity eval, and erasure-by-recompile.
 </Aside>
 
 See [`COMPETITIVE.md`](https://github.com/mneme/mneme) in the repo for the

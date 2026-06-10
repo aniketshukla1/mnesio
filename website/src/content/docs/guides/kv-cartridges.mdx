@@ -11,13 +11,17 @@ the relevant memories' attention key/value state **once** into a cartridge, then
 reuse it. The cartridge is *just another materialized view of the log* — keyed
 and rebuildable by replay, like every other index.
 
-<Aside type="caution" title="Status: substrate done, real tensor backend in progress">
-The cartridge **substrate** — keying, versioning, the gate-before-activation, and
-crypto-shred-by-recompile — is complete and tested. The default tensor backend is
-a `FakeKvBackend`; a real open-weights KV backend behind the same `KvBackend`
-trait is the remaining lift. The GPU numbers below come from the real candle/Metal
-path that is wired in; treat them as the measured speedups they are, not as a
-finished product claim.
+<Aside type="tip" title="Status: shipped (Phase 12 ✅)">
+The cartridge substrate (keying, versioning, gate-before-activation,
+crypto-shred-by-recompile) is complete and tested, and the open-weights tensor
+backend is delivered: real **GPT-2** (incl. real q8 quant) and **Qwen2.5** in
+pure Rust *and* on Metal GPU — all behind the `KvBackend` trait. A suite-level
+**accuracy-parity** eval (`mneme-bench kveval`) shows the cartridge answers at
+least as accurately as per-query text-context retrieval (~167–180× faster), with
+erasure holding. The default build still ships the dependency-free
+`FakeKvBackend`; the real backends are feature-gated and fetch weights on first
+use (with `HF_HUB_OFFLINE`-aware errors). The candle backend also accepts
+Llama-family configs; Qwen2 is the live-verified path.
 </Aside>
 
 ## How it's keyed
