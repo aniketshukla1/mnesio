@@ -3,7 +3,8 @@
 *Snapshot: June 2026. Companion to [`COMPETITIVE.md`](COMPETITIVE.md), which captured
 the mid-2025 field (Mem0 / Zep / Letta / Cognee / A-MEM). That doc is not wrong, but
 the field has since exploded from ~5 systems to dozens, so this file is the current
-read.*
+read. The maintained **per-competitor scorecard + deep profiles** live in
+[`COMPETITORS.md`](COMPETITORS.md).*
 
 > **Read every number here as self-reported and provisional.** Each vendor runs its
 > own harness, answerer model, and judge, so scores conflict badly across sources
