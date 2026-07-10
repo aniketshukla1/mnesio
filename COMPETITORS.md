@@ -47,6 +47,11 @@ Legend: ✅ has it · ◑ partial/adjacent · ❌ absent. **Threat tiers:** 🔴
 | Memobase | ❌ | ❌ | ❌ | ◑(profile) | ❌ | ❌ | ❌ | — | 🟡 |
 | Redis Agent Memory Server | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | sub-ms retrieval | 🟡 |
 | MS Kernel Memory | ❌ | ❌ | ❌ | ◑(Azure lineage) | ❌ | ❌ | ❌ | — | 🟡 |
+| OpenViking (ByteDance) | ❌ | ◑ | ❌ | ◑ | ❌ | ◑(skills) | ❌ | — (filesystem context DB) | 🟠 |
+| RetainDB | ❌ | ◑ | ❌ | ❌ | ❌ | ❌ | ◑ | "SOTA LongMemEval" (self) | 🟠 |
+| MemU | ❌ | ❌ | ❌ | ◑ | ◑(decay) | ◑ | ◑ | 92.09% LoCoMo (self) | 🟡 |
+| MIRIX | ❌ | ❌ | ❌ | ◑ | ❌ | ◑(proc type) | ◑ | 85.4% LoCoMo; multimodal | 🟡 |
+| Second Me (Mindverse) | ❌ | ❌ | ❌ | ◑ | ◑(local-only) | ❌ | ❌ | — (AI identity model) | 🟡 |
 
 **mneme is the only row that's filled across all seven.** GATE and SHRED are
 unmatched by *every* competitor; KV is unmatched as a *governed* view. The honest
@@ -117,6 +122,42 @@ published LoCoMo number yet** — fix first (see COMPETITIVE-2026 Tier-1).
 - **Redis Agent Memory Server:** infra (sub-ms vector), composes *under* Mem0/LangMem — not a framework. Potential **substrate dependency**, not a rival.
 - **MS Kernel Memory:** RAG + Azure IAM access control (≠ a safety gate). Enterprise lock-in; no temporal/graph/procedural.
 
+### Tier-2 deep profiles (named-request batch, 2026-06-11)
+
+### OpenViking — 🟠 ByteDance's filesystem context DB
+- **What:** open-source "context database" for agents (OpenClaw-targeted) from the Volcengine/Viking team at **ByteDance**.
+- **Architecture:** treats agent context as a **filesystem** — unifies memory + resources + **skills** in a hierarchical tree (not flat RAG); modular storage/retrieval/parsing/session; a built-in self-iteration loop compresses conversation + extracts long-term memory ("self-evolving"); **no external DB**. Cross-session user modeling + dialectic reasoning.
+- **Numbers:** none published found.
+- **vs mneme — they win:** ByteDance backing + distribution; **hierarchical context delivery + skills** is the single closest system to *both* mneme's wedge *and* the Context-Tree retrieval idea we're roadmapping; zero-infra.
+- **vs mneme — we win:** no gate; filesystem "self-evolving" ≠ append-only + invalidate-and-supersede on an immutable log; no KV cartridge, no crypto-shred, no reproducible eval; skill reuse is **ungated**.
+
+### RetainDB — 🟠 production memory infra (mirrors our retrieval plan)
+- **What:** commercial persistent-memory infrastructure for agents (retaindb.com); markets "**SOTA on LongMemEval**."
+- **Architecture:** hybrid retrieval = **vector + BM25 + reranking**, "no LLM-extraction overhead," cross-session/device, noise-filtering + signal reinforcement; positions on "decide what to remember, when old facts are invalidated."
+- **Numbers:** self-claimed SOTA LongMemEval (unverified).
+- **vs mneme — they win:** production polish; its retrieval stack is **exactly the multi-signal + reranker** parity work below; low overhead (no LLM extraction on write).
+- **vs mneme — we win:** closed/commercial (mneme fully OSS); no gate/append-only/KV/provenance/crypto-shred shown; "invalidation" without an immutable-log substrate.
+
+### MemU — 🟡 companion-focused, big community
+- **What:** open-source memory framework for **AI companions** (NevaMind-AI); broad integrations (n8n, LangGraph, AutoGPT, Dify, LlamaIndex), FastAPI server + Go SDK.
+- **Architecture:** multi-modal ingest → structured memory; RAG + LLM retrieval (semantic/hybrid/contextual); **usage-based prioritization + forgetting** (Ebbinghaus-style decay).
+- **Numbers:** **92.09% LoCoMo** (self-reported).
+- **vs mneme — they win:** companion UX, ecosystem reach, strong self-reported LoCoMo, decay/forgetting shipped.
+- **vs mneme — we win:** no gate/append-only/KV/provenance/crypto-shred; "forgetting" is decay/deprioritize, not crypto-shred on an immutable log; no reproducible methodology. Different buyer (companions).
+
+### MIRIX — 🟡 richest taxonomy + multimodal/screen
+- **What:** research multi-agent memory system (arXiv 2507.07957, MIRIX AI); a packaged app monitors the screen and stores locally.
+- **Architecture:** **six memory types** — Core / Episodic / Semantic / **Procedural** / Resource / Knowledge Vault — each with its own Manager, plus a Meta Memory Manager for routing; multimodal; local-first for privacy.
+- **Numbers:** **85.4% LoCoMo**; ScreenshotVQA +35% vs RAG at 99.9% less storage.
+- **vs mneme — they win:** the most complete memory **taxonomy** (incl. a Procedural type), multimodal/screenshot capture, local privacy.
+- **vs mneme — we win:** MIRIX's "Procedural" is a *storage category*, not a **gated self-improvement loop**; no gate/append-only/KV/crypto-shred/provenance. (Good system to cite when explaining mneme's procedural is *gated*, not just a bucket.)
+
+### Second Me — 🟡 personal AI identity (adjacent category)
+- **What:** open-source **AI identity model** (Mindverse) — "train your AI self," 100% local/private; arXiv "AI-native Memory 2.0."
+- **Architecture:** Hierarchical Memory Modeling (HMM) + Me-Alignment; Chat + Bridge modes; fully local deployment.
+- **vs mneme — they win:** privacy-by-design (local-only), personal-identity framing.
+- **vs mneme — we win:** it's a *personal AI identity* product, not agent-memory infra — no gate/append-only/KV/provenance/crypto-shred/procedural, not a benchmark player. Mostly a different market than mneme.
+
 ## Long-tail tracker (categories from COMPETITIVE-2026 §1)
 
 Characterized from the TeleAI index, not individually deep-fetched — promote to a
@@ -128,8 +169,8 @@ Tier-1 profile if one gains traction.
 | Decay/forgetting | PowerMem (Ebbinghaus), Vestige (FSRS-6), Suyi (dual-temporal), widemem-ai | nibble at consolidation | heuristic decay vs mneme's causal/contribution GC |
 | Self-evolving/procedural (research) | MemSkill, ProcMEM, MemRL, Mem-α, EvolveR, MUSE, AgentEvolver, SE-GA, EverOS, "Agent Knowledge Cycle" | nibble at PROC | none gate the self-improvement |
 | KV / model-level memory | HERMES (KV-as-memory, video), Memory Decoder (pretrained plug-in), RecMem, PRIME | nibble at KV | not a governed log view |
-| Profile / enterprise context | OpenViking, MemPalace (valid_from/to), memco, Hyper, Glia, MemClaw/Caura, CommonGround Kernel | enterprise governance pull | MemPalace closest on BITEMP |
-| Multimodal/video memory | MIRIX, m3-agent, HippoMM, WorldMM, MemVerse, Visual Agentic Memory | adjacent market | out of mneme's current scope |
+| Profile / enterprise context | MemPalace (valid_from/to), memco, Hyper, Glia, MemClaw/Caura, CommonGround Kernel | enterprise governance pull | MemPalace closest on BITEMP; OpenViking profiled above |
+| Multimodal/video memory | m3-agent, HippoMM, WorldMM, MemVerse, Visual Agentic Memory | adjacent market | out of mneme's current scope; MIRIX profiled above |
 
 ## The throughline — how mneme beats the field
 

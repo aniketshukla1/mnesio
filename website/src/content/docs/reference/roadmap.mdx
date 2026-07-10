@@ -90,5 +90,23 @@ All of Phases 10–15 are shipped behind the seven hard rules, each with a live
 backends on CPU + GPU, a CI-gated accuracy-parity eval, and erasure-by-recompile.
 </Aside>
 
+## What's next (planned)
+
+### Phase 16 — Retrieval parity ◑ planned
+The frontier bets are mneme's moat; this phase keeps **retrieval** competitive with
+the 2026 leaders on the hard LoCoMo categories (multi-hop, temporal) by folding two
+ideas from the [competitor tracker](https://github.com/mneme/mneme/blob/main/COMPETITORS.md)
+into the existing RRF fusion — behind the same seven hard rules:
+
+- **Multi-strategy retrieval + cross-encoder reranker** — add entity-graph and
+  temporal-filter signals alongside vector + BM25, then a reranker stage (the
+  Hindsight / RetainDB approach).
+- **Hierarchical / Context-Tree traversal** — organize memories
+  domain→topic→subtopic and traverse hierarchically for multi-session queries (the
+  ByteRover / OpenViking filesystem-hierarchy approach), folded into the fused rank.
+
+Done when: LoCoMo multi-hop + temporal sub-scores improve over the flat-hybrid
+baseline in `mneme-bench`, with no regression to recall@k or the &lt;5ms write path.
+
 See [`COMPETITIVE.md`](https://github.com/mneme/mneme) in the repo for the
 per-competitor "why they can't copy this" breakdown.
