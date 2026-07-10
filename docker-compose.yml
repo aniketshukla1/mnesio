@@ -1,0 +1,27 @@
+# One command to run mneme with no Rust toolchain installed:
+#
+#     docker compose up --build
+#
+# Then open the live dashboard at http://localhost:7777.
+services:
+  mneme:
+    build: .
+    image: mneme:local
+    ports:
+      - "7777:7777"
+    environment:
+      # Bind all interfaces inside the container so the published port works.
+      MNEME_HOST: "0.0.0.0"
+      # Instant-demo defaults — zero external downloads on first boot.
+      MNEME_DEMO: "1"
+      MNEME_EMBEDDER: "mock"
+      MNEME_PROCEDURAL: "on"
+      RUST_LOG: "info"
+      # --- For real, persistent use: set MNEME_DEMO to "0" and MNEME_EMBEDDER
+      #     to "fastembed" (downloads bge-small-en-v1.5 on first run). The log
+      #     then persists in the named volume below across restarts. ---
+    volumes:
+      - mneme-data:/data
+
+volumes:
+  mneme-data:

@@ -1,0 +1,21 @@
+# Keep the Docker build context small + reproducible.
+target/
+mneme-data/
+.fastembed_cache/
+.git/
+**/*.rs.bk
+.DS_Store
+
+# Website (Astro) + Node SDK build artifacts — not needed to build the server.
+website/node_modules/
+website/dist/
+website/.astro/
+sdk/node/node_modules/
+sdk/node/dist/
+
+# Downloaded benchmark cache.
+crates/mneme-bench/data/cache/
+
+# Local-only brief documents.
+mneme-project-brief.docx
+mneme-project-brief.txt

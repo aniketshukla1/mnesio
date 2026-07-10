@@ -1,25 +1,54 @@
 ---
 title: Getting started
-description: Build mneme from source, run the server, and open the dashboard.
+description: Run mneme in one command — Docker, a Makefile target, or from source.
 ---
 
 import { Steps, Aside, Tabs, TabItem } from '@astrojs/starlight/components';
 
-mneme is a Rust workspace. You build it from source today; published crates and
-prebuilt binaries are on the roadmap.
+mneme is a Rust workspace. The fastest way to see it running is Docker (no
+toolchain) or a single `make` target; building from source is the third option.
+Every path lands you on the same live dashboard at `http://localhost:7777`.
 
-## Prerequisites
+## Fastest — no Rust toolchain (Docker)
 
-- **Rust** (stable, 1.75+) — install via [rustup](https://rustup.rs).
-- A C toolchain (for native dependencies like `tantivy` and `hnsw_rs`).
-- Optional: **Ollama** for local-LLM evaluation; a **Metal/CUDA GPU** for KV
-  cartridges; **Python 3.9+** + `maturin` for the Python bindings.
+Builds and runs the server in a container and serves the live dashboard with
+**zero external downloads** on first boot (mock embedder + synthetic writer):
 
-## Build
+```bash
+git clone https://github.com/mneme/mneme.git && cd mneme
+docker compose up --build
+```
+
+Open `http://localhost:7777`. For real, persistent use, set `MNEME_DEMO=0` and
+`MNEME_EMBEDDER=fastembed` in `docker-compose.yml` (fastembed downloads
+`bge-small-en-v1.5` on first run; the log persists in the `mneme-data` volume).
+
+## With Rust installed — one word
+
+```bash
+git clone https://github.com/mneme/mneme.git && cd mneme
+make demo     # instant demo: live dashboard, zero downloads (mock embedder + learning curve)
+```
+
+Other targets (`make` on its own lists them all):
+
+| Target | What it does |
+| --- | --- |
+| `make demo` | Instant demo — mock embedder, synthetic writer, live procedural learning curve |
+| `make run` | Real server — persistent log + fastembed embeddings |
+| `make test` | The workspace test suite |
+| `make lint` | Exactly what CI enforces (`fmt --check` + `clippy -D warnings`) |
+| `make mcp` | Install the MCP binary for Claude Desktop / Cursor / any MCP client |
+| `make docker` | The Docker path above |
+
+## From source
 
 <Steps>
 
-1. Clone and build the workspace:
+1. Prerequisites: **Rust** (stable, 1.75+, via [rustup](https://rustup.rs)) and
+   a C toolchain (for native deps like `tantivy` and `hnsw_rs`).
+
+2. Clone and build the workspace:
 
    ```bash
    git clone https://github.com/mneme/mneme.git
@@ -27,15 +56,10 @@ prebuilt binaries are on the roadmap.
    cargo build --release
    ```
 
-2. Run the test suite to confirm everything is green:
+3. Run the tests and lint exactly as CI does:
 
    ```bash
    cargo test
-   ```
-
-3. Lint exactly as CI does (this must pass before any commit):
-
-   ```bash
    cargo fmt --check
    cargo clippy -- -D warnings
    ```
@@ -44,21 +68,38 @@ prebuilt binaries are on the roadmap.
 
 ## Run the server + dashboard
 
-The host process (`mneme-server`) exposes an HTTP API and a live dashboard.
+The host process (`mneme-server`, binary name `mneme`) exposes an HTTP API and a
+live dashboard.
 
 ```bash
+# Real embeddings (fastembed, 384-d) — downloads bge-small on first run:
 cargo run --release -p mneme-server
+
+# Or offline/instant with the deterministic mock embedder (no download):
+MNEME_EMBEDDER=mock cargo run --release -p mneme-server
 ```
 
-Then open the dashboard at `http://localhost:3000` (default). It surfaces the
-live panels for retrieval metrics, memory evolution, the procedural learning
-curve, and each frontier phase (causal, probe, KV, exchange, dream, provenance).
+Open `http://localhost:7777`. The dashboard surfaces live panels for retrieval
+metrics, memory evolution, the procedural learning curve, and each frontier
+phase (causal, probe, KV, exchange, dream, provenance).
 
 <Aside type="tip">
-Set `MNEME_PROCEDURAL=1` to spawn the procedural compiler worker, and point the
-LLM-backed features at a running Ollama with the `ollama` feature. The default
-build uses deterministic stand-ins so everything runs offline.
+Add `MNEME_DEMO=1` for a fresh temp data dir plus a synthetic writer, and
+`MNEME_PROCEDURAL=on` to spawn the procedural compiler worker. The default build
+uses deterministic stand-ins so everything runs offline; point the LLM-backed
+features at a running Ollama with `MNEME_EVOLVE_LLM=ollama`.
 </Aside>
+
+### Key environment variables
+
+| Env var | Default | Meaning |
+| --- | --- | --- |
+| `MNEME_PORT` | `7777` | HTTP listen port |
+| `MNEME_HOST` | `127.0.0.1` | Bind address; the Docker image sets `0.0.0.0` |
+| `MNEME_DATA` | `./mneme-data` | Path to the fjall keyspace |
+| `MNEME_EMBEDDER` | `fastembed` | `mock` for the 32-d deterministic embedder (no download) |
+| `MNEME_DEMO` | `0` | `1` → temp data dir + synthetic writer |
+| `MNEME_PROCEDURAL` | `off` | `on` → spawn the procedural compiler worker |
 
 ## Storage layout
 
@@ -67,25 +108,25 @@ materialized views. By default it lives under `./mneme-data`. Because the log is
 the single system of record, **every index is rebuildable by replaying events** —
 deleting a view directory and restarting reconstructs it.
 
-## Optional: feature flags
+## Optional: heavier feature flags
 
 <Tabs>
-  <TabItem label="Real embeddings">
-```bash
-# fastembed (384-d) instead of the mock embedder
-cargo run --release -p mneme-server --features fastembed
-```
-  </TabItem>
   <TabItem label="Local LLM">
 ```bash
-# route evolution / procedural / qaeval through Ollama
+# route evolution / procedural / qaeval through a local Ollama model
 cargo run --release -p mneme-server --features ollama
+```
+  </TabItem>
+  <TabItem label="Real crypto">
+```bash
+# ChaCha20-Poly1305 keyring + ed25519 skill certificates
+cargo run --release -p mneme-server --features aead,ed25519
 ```
   </TabItem>
   <TabItem label="GPU KV">
 ```bash
-# candle/Metal GPU backend for KV cartridges
-cargo run --release -p mneme-server --features kv-gpu
+# candle/Metal GPU backend for KV cartridges (also needs MNEME_KV_GPU=1)
+MNEME_KV_GPU=1 cargo run --release -p mneme-server --features candle-kv,metal
 ```
   </TabItem>
 </Tabs>

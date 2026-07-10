@@ -47,7 +47,7 @@ use mneme_index::{
     SnippetSynthesizer, VectorView,
 };
 use mneme_store::FjallEventLog;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use viz::AppState;
@@ -335,7 +335,15 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(7777);
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    // Bind host is configurable so the same binary works locally and in a
+    // container. Default stays loopback (`127.0.0.1`) so a bare `cargo run`
+    // never exposes the server on the network by accident; the Docker image
+    // sets `MNEME_HOST=0.0.0.0` so the published port is reachable.
+    let host: IpAddr = std::env::var("MNEME_HOST")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
+    let addr = SocketAddr::new(host, port);
     tracing::info!(%addr, "mneme-server listening — open http://{addr} in a browser");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

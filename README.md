@@ -27,14 +27,28 @@ Two continuous loops operate over a single append-only event log:
 
 ## ⚡ Quick start
 
+**Fastest — no Rust toolchain, one command** (builds + runs in Docker, serves the
+live dashboard on `http://localhost:7777` with zero external downloads):
+
 ```bash
-git clone https://github.com/mneme/mneme.git
-cd mneme
+git clone https://github.com/mneme/mneme.git && cd mneme
+docker compose up --build
+```
 
-# Run the workspace tests (380 passing)
-cargo test --workspace
+**With Rust installed — one word:**
 
-# Boot the demo: live retrieval + memory evolution + procedural compiler
+```bash
+git clone https://github.com/mneme/mneme.git && cd mneme
+make demo          # instant demo: live dashboard, zero downloads (mock embedder)
+# make run         # real, persistent server (fastembed — downloads bge-small once)
+# make test        # the workspace test suite
+# make mcp         # install the MCP binary for Claude Desktop / Cursor / etc.
+# make             # list every target
+```
+
+**Or the plain command** the `make demo` target runs:
+
+```bash
 MNEME_DEMO=1 MNEME_PROCEDURAL=on cargo run -p mneme-server
 ```
 
@@ -55,6 +69,7 @@ In the demo, watch the **PROCEDURAL** section's learning curve climb from ~33% t
 | `MNEME_EVOLVE_LLM` | `demo` | `ollama` for a real local model via `MNEME_OLLAMA_URL` / `MNEME_OLLAMA_MODEL` |
 | `MNEME_DATA` | `./mneme-data` | Path to the fjall keyspace |
 | `MNEME_PORT` | `7777` | HTTP listen port |
+| `MNEME_HOST` | `127.0.0.1` | Bind address. Stays loopback by default; the Docker image sets `0.0.0.0` so the published port is reachable |
 
 ---
 
