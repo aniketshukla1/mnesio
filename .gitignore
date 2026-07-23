@@ -27,3 +27,12 @@ website/package-lock.json
 
 # Local agent/editor tooling config — not part of the published project
 .claude/
+
+# Secrets — never commit. mneme reads all API keys from the environment only.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json

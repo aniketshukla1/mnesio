@@ -133,7 +133,7 @@ impl LlmClient for OpenAiCompatClient {
             .bearer_auth(&self.api_key)
             // OpenRouter uses these for attribution/leaderboards; harmless
             // elsewhere. No PII — just identifies the caller as mneme.
-            .header("HTTP-Referer", "https://github.com/mneme/mneme")
+            .header("HTTP-Referer", "https://github.com/aniketshukla1/mneme")
             .header("X-Title", "mneme-bench")
             .json(&req)
             .send()

@@ -3,10 +3,10 @@
   <p><strong>A self-improving long-term memory layer for AI agents, built in Rust.</strong></p>
 
   <p>
-    <a href="https://github.com/mneme/mneme/actions"><img alt="Build Status" src="https://img.shields.io/badge/build-passing-brightgreen"></a>
+    <a href="https://github.com/aniketshukla1/mneme/actions"><img alt="Build Status" src="https://img.shields.io/badge/build-passing-brightgreen"></a>
     <a href="https://crates.io/crates/mneme"><img alt="Version" src="https://img.shields.io/badge/version-v0.1.0-blue"></a>
-    <a href="https://github.com/mneme/mneme/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
-    <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-380%20passing-brightgreen"></a>
+    <a href="https://github.com/aniketshukla1/mneme/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
+    <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-509%20passing-brightgreen"></a>
   </p>
 </div>
 
@@ -31,14 +31,14 @@ Two continuous loops operate over a single append-only event log:
 live dashboard on `http://localhost:7777` with zero external downloads):
 
 ```bash
-git clone https://github.com/mneme/mneme.git && cd mneme
+git clone https://github.com/aniketshukla1/mneme.git && cd mneme
 docker compose up --build
 ```
 
 **With Rust installed — one word:**
 
 ```bash
-git clone https://github.com/mneme/mneme.git && cd mneme
+git clone https://github.com/aniketshukla1/mneme.git && cd mneme
 make demo          # instant demo: live dashboard, zero downloads (mock embedder)
 # make run         # real, persistent server (fastembed — downloads bge-small once)
 # make test        # the workspace test suite

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+publish = false
 
 [lib]
 # `cdylib` is what maturin packages into a Python wheel; `rlib` lets

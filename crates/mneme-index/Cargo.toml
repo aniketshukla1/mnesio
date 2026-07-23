@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+description = "Retrieval views for mneme: HNSW vector index, tantivy BM25, and hybrid RRF fusion."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
 
 [features]
 # `fastembed` brings in ort + ONNX runtime + ~30MB of model download on first

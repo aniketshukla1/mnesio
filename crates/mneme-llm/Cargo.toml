@@ -5,6 +5,11 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 description = "LlmClient implementations for mneme: Fake (deterministic, dep-free) + Ollama (local HTTP backend)."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
 
 [features]
 # `ollama` pulls in reqwest + serde_json so callers that don't need the
