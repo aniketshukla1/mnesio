@@ -12,6 +12,11 @@ description = "LlmClient implementations for mneme: Fake (deterministic, dep-fre
 # so `cargo build` from the workspace root gets the full client.
 default = ["ollama"]
 ollama = ["dep:reqwest", "dep:serde_json"]
+# `openai` adds an OpenAI-compatible chat client (OpenRouter / OpenAI / any
+# `/v1/chat/completions` gateway). Same reqwest + serde_json dep tree as
+# `ollama`. Off by default so lean builds stay HTTP-free; the bench binary
+# turns it on to run the published LoCoMo / LongMemEval numbers.
+openai = ["dep:reqwest", "dep:serde_json"]
 
 [dependencies]
 mneme-core.workspace = true

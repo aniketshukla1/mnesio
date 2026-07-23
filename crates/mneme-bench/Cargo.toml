@@ -31,6 +31,11 @@ default = []
 # LLM and the executor LLM. Off by default — the demo path uses a
 # content-derived stub so the benchmark runs offline.
 ollama = ["mneme-llm/ollama"]
+# Enable to run `--llm openrouter` / `--executor openrouter` against an
+# OpenAI-compatible endpoint (OpenRouter by default). One key reaches Claude +
+# GPT — the frontier-class answerer + judge for the published LoCoMo /
+# LongMemEval numbers. Key is read from OPENROUTER_API_KEY (env-only).
+openai = ["mneme-llm/openai"]
 # Enable to download a real public benchmark (e.g. rajpurkar/squad) from the
 # Hugging Face datasets-server into a MemEvalSuite. Pulls in reqwest; off by
 # default so the core build + CI stay offline + network-free.
