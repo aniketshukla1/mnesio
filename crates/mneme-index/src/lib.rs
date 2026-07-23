@@ -13,20 +13,24 @@
 pub mod acl;
 pub mod bm25;
 pub mod chunker;
+pub mod context_tree;
 pub mod embedder;
 pub mod partitioned_vector;
 pub mod profile;
+pub mod rerank;
 pub mod synthesizer;
 pub mod vector;
 
 pub use acl::{AgentAclView, AgentAttribution};
 pub use bm25::{Bm25Tier, Bm25View};
 pub use chunker::{Chunker, ParagraphChunker};
+pub use context_tree::ContextTree;
 #[cfg(feature = "fastembed")]
 pub use embedder::FastEmbedEmbedder;
 pub use embedder::MockEmbedder;
 pub use partitioned_vector::{TenantPartitionedVectorView, TenantStats};
 pub use profile::{AttributeState, ProfileValue, ProfileView};
+pub use rerank::LexicalReranker;
 pub use synthesizer::SnippetSynthesizer;
 pub use vector::VectorView;
 
@@ -46,11 +50,28 @@ pub trait ProximityProvider: Send + Sync {
     fn boost(&self, memory: MemoryRef, candidates: &[MemoryRef]) -> f32;
 }
 
+/// Content resolver seam (Phase 16). A content-aware reranker needs each
+/// candidate's full text, but a [`Hit`] only carries a [`MemoryRef`]. This
+/// trait resolves `MemoryRef -> content` so the reranker stays decoupled
+/// from any particular store — production wires [`Bm25View`] (which has the
+/// content `STORED`); tests use an in-memory map.
+pub trait ContentProvider: Send + Sync {
+    /// The stored content of a memory, or `None` if it isn't live.
+    fn content(&self, memory: MemoryRef) -> Option<String>;
+}
+
+impl ContentProvider for Bm25View {
+    fn content(&self, memory: MemoryRef) -> Option<String> {
+        Bm25View::content(self, memory)
+    }
+}
+
 /// Final reorder seam. The fused+weighted list is handed to a reranker
 /// before truncation to `k` — this is where a cross-encoder or LLM
 /// reranker plugs in (Mem0/Zep ship Cohere/HF rerankers here). The
 /// default [`IdentityReranker`] is a no-op so fusion behaviour is
-/// unchanged unless a reranker is explicitly wired.
+/// unchanged unless a reranker is explicitly wired. Phase 16 ships a
+/// content-aware [`rerank::LexicalReranker`] here.
 #[async_trait::async_trait]
 pub trait Reranker: Send + Sync {
     async fn rerank(&self, query: &str, hits: Vec<Hit>) -> Result<Vec<Hit>, MnemeError>;

@@ -55,6 +55,20 @@ the top-`k` retrieved memories contains the gold answer span. Suites: `locomo`,
 `longmemeval` (LOCOMO / LongMemEval style, shipped in `data/`). `--min-recall N`
 gates CI.
 
+**Phase-16 reranker A/B.** `--rerank` wires the content-aware
+`mneme_index::rerank::LexicalReranker` as the retriever's final stage;
+`--compare-rerank` runs the suite twice (flat hybrid vs. reranked) and prints a
+per-category Δ table (and exits 1 if reranking regresses overall recall). On
+LongMemEval-mini with the real semantic embedder at `k=1`, the reranker's
+*update-cue* feature surfaces the superseding memory over its stale original:
+
+```bash
+cargo run -p mneme-bench --release -- memeval \
+  --suite longmemeval --k 1 --embedder fastembed --compare-rerank
+# knowledge-update 0.0% -> 100.0% (+100.0pp);  overall 80.0% -> 100.0% (+20.0pp)
+# no other category regresses; LoCoMo-mini holds 100% across the board
+```
+
 ### `scale` — load test on a synthetic corpus
 Generates a deterministic synthetic corpus (see below) and drives it through the
 real path, **separating the two write phases** so the numbers reflect mneme's

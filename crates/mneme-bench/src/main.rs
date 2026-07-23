@@ -24,7 +24,7 @@
 //!   alignment drift is the hard stop.
 
 use anyhow::{bail, Result};
-use mneme_bench::memeval::{load_memeval_suite, run_memeval, MemEvalReport};
+use mneme_bench::memeval::{load_memeval_suite, run_memeval, run_memeval_ab, MemEvalReport};
 use mneme_bench::report::{render_comparison, render_learning_curve};
 use mneme_bench::{
     compare_artifacts, load_suite, run_bench, BenchRun, BenchSuite, ComparisonReport, DemoBenchLlm,
@@ -79,7 +79,21 @@ fn build_qa_llm(choice: &str) -> Result<Arc<dyn LlmClient>> {
              `cargo run -p mneme-bench --features ollama -- qaeval --llm ollama ...` \
              and a running Ollama (MNEME_OLLAMA_MODEL / OLLAMA_HOST)"
         ),
-        other => bail!("unknown --llm {other:?}; expected `demo` or `ollama`"),
+        // OpenRouter / OpenAI / any OpenAI-compatible gateway. One key reaches
+        // both Claude and GPT models — the frontier answerer + judge the
+        // published LoCoMo / LongMemEval numbers need. Key is env-only.
+        #[cfg(feature = "openai")]
+        "openrouter" | "openai" => Ok(Arc::new(mneme_llm::OpenAiCompatClient::from_env()?)),
+        #[cfg(not(feature = "openai"))]
+        "openrouter" | "openai" => bail!(
+            "--llm {choice} requires the `openai` feature; rebuild with \
+             `cargo run -p mneme-bench --features openai -- qaeval --llm openrouter ...` \
+             and set OPENROUTER_API_KEY (+ optional MNEME_OPENAI_MODEL, e.g. \
+             anthropic/claude-3.5-sonnet)"
+        ),
+        other => {
+            bail!("unknown --llm {other:?}; expected `demo`, `ollama`, or `openrouter`/`openai`")
+        }
     }
 }
 
@@ -311,7 +325,7 @@ async fn cmd_fetch(opts: FetchOpts) -> Result<()> {
         "# running recall@{} over the real corpus (embedder={})…",
         opts.k, opts.embedder
     );
-    let report = run_memeval(&suite, opts.k, &opts.embedder).await?;
+    let report = run_memeval(&suite, opts.k, &opts.embedder, false).await?;
     let out = format_memeval_markdown(&report);
     println!("{out}");
     write_memeval_summary_to_stderr(&report);
@@ -409,10 +423,60 @@ async fn cmd_memeval(opts: MemEvalOpts) -> Result<()> {
     };
     let suite = load_memeval_suite(json)?;
     eprintln!(
-        "# mneme-bench memeval · suite={} · k={} · embedder={}",
-        suite.name, opts.k, opts.embedder
+        "# mneme-bench memeval · suite={} · k={} · embedder={} · rerank={}",
+        suite.name,
+        opts.k,
+        opts.embedder,
+        if opts.compare_rerank {
+            "compare"
+        } else if opts.rerank {
+            "on"
+        } else {
+            "off"
+        }
     );
-    let report = run_memeval(&suite, opts.k, &opts.embedder).await?;
+
+    // --compare-rerank: run flat hybrid vs. reranked and print the A/B delta.
+    if opts.compare_rerank {
+        // Paired A/B over one ingested index — see `run_memeval_ab`.
+        let (base, rr) = run_memeval_ab(&suite, opts.k, &opts.embedder).await?;
+        let out_text = format_rerank_comparison(&base, &rr);
+        write_output(&opts.out_path, &out_text)?;
+        write_rerank_comparison_to_stderr(&base, &rr);
+        // CI-style guard: the reranked run must not regress overall recall —
+        // *nor any single category*. A per-category check is the one that
+        // catches a reranker that trades one category off against another
+        // while the headline number still goes up.
+        let mut regressed = false;
+        if rr.recall() + 1e-6 < base.recall() {
+            eprintln!(
+                "# REGRESSION: rerank dropped overall recall@{} {:.1}% -> {:.1}%.",
+                opts.k,
+                base.recall() * 100.0,
+                rr.recall() * 100.0
+            );
+            regressed = true;
+        }
+        for c in &base.per_category {
+            let a = rr.category_rate(&c.category);
+            if a + 1e-6 < c.rate() {
+                eprintln!(
+                    "# REGRESSION: category {} dropped {:.1}% -> {:.1}%.",
+                    c.category,
+                    c.rate() * 100.0,
+                    a * 100.0
+                );
+                regressed = true;
+            }
+        }
+        if regressed {
+            eprintln!("# Exit 1.");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+
+    let report = run_memeval(&suite, opts.k, &opts.embedder, opts.rerank).await?;
 
     let out_text = match opts.output {
         OutputFormat::Json => format_memeval_json(&report)?,
@@ -436,6 +500,66 @@ async fn cmd_memeval(opts: MemEvalOpts) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Per-category A/B table: flat hybrid vs. the Phase-16 reranker. This is the
+/// Phase-16 "done when" artifact — multi-hop + temporal should move up while
+/// overall recall holds.
+fn format_rerank_comparison(base: &MemEvalReport, rr: &MemEvalReport) -> String {
+    let mut out = format!(
+        "# mneme-bench · {} · recall@{} · Phase-16 reranker A/B (embedder: {})\n\n",
+        base.suite_name, base.k, base.embedder
+    );
+    out.push_str(&format!(
+        "**Overall recall@{}: {:.1}% → {:.1}% ({:+.1}pp)** · {} questions · {} memories\n\n",
+        base.k,
+        base.recall() * 100.0,
+        rr.recall() * 100.0,
+        (rr.recall() - base.recall()) * 100.0,
+        base.total_questions,
+        base.memory_count,
+    ));
+    out.push_str("| category | flat hybrid | + reranker | Δ |\n|---|---|---|---|\n");
+    // Union of categories, stable order from the baseline report.
+    for c in &base.per_category {
+        let b = c.rate();
+        let a = rr.category_rate(&c.category);
+        out.push_str(&format!(
+            "| {} | {:.1}% | {:.1}% | {:+.1}pp |\n",
+            c.category,
+            b * 100.0,
+            a * 100.0,
+            (a - b) * 100.0
+        ));
+    }
+    out.push('\n');
+    out.push_str(&format!(
+        "_latency: {:.2} → {:.2} ms/query_\n",
+        base.mean_latency_ms, rr.mean_latency_ms
+    ));
+    out
+}
+
+fn write_rerank_comparison_to_stderr(base: &MemEvalReport, rr: &MemEvalReport) {
+    eprintln!();
+    eprintln!("# rerank A/B summary:");
+    eprintln!(
+        "#   overall recall@{}: {:.1}% -> {:.1}% ({:+.1}pp)",
+        base.k,
+        base.recall() * 100.0,
+        rr.recall() * 100.0,
+        (rr.recall() - base.recall()) * 100.0
+    );
+    for c in &base.per_category {
+        let a = rr.category_rate(&c.category);
+        eprintln!(
+            "#   {:<12} {:.1}% -> {:.1}% ({:+.1}pp)",
+            c.category,
+            c.rate() * 100.0,
+            a * 100.0,
+            (a - c.rate()) * 100.0
+        );
+    }
 }
 
 fn format_memeval_markdown(report: &MemEvalReport) -> String {
@@ -488,6 +612,7 @@ fn format_memeval_json(report: &MemEvalReport) -> Result<String> {
         "recalled": report.recalled,
         "recall": report.recall(),
         "mean_latency_ms": report.mean_latency_ms,
+        "rerank": report.rerank,
         "per_category": cats,
     });
     Ok(serde_json::to_string_pretty(&payload)?)
@@ -904,7 +1029,23 @@ fn build_executor(
             "--executor ollama requires the `ollama` feature; rebuild with \
              `cargo run -p mneme-bench --features ollama ...`"
         ),
-        other => bail!("unknown --executor {other:?}; expected `demo` or `ollama`"),
+        #[cfg(feature = "openai")]
+        "openrouter" | "openai" => {
+            use mneme_llm::OpenAiCompatClient;
+            use mneme_procedural::LlmExecutor;
+            let client = Arc::new(OpenAiCompatClient::from_env()?);
+            let llm: Arc<dyn LlmClient> = client.clone();
+            let exec: Arc<dyn PolicyExecutor> = Arc::new(LlmExecutor::new(client));
+            Ok((llm, exec))
+        }
+        #[cfg(not(feature = "openai"))]
+        "openrouter" | "openai" => bail!(
+            "--executor {choice} requires the `openai` feature; rebuild with \
+             `cargo run -p mneme-bench --features openai ...` and set OPENROUTER_API_KEY"
+        ),
+        other => bail!(
+            "unknown --executor {other:?}; expected `demo`, `ollama`, or `openrouter`/`openai`"
+        ),
     }
 }
 
@@ -1061,6 +1202,11 @@ struct MemEvalOpts {
     output: OutputFormat,
     out_path: Option<std::path::PathBuf>,
     min_recall: Option<f32>,
+    /// Wire the Phase-16 content-aware `LexicalReranker` as the final stage.
+    rerank: bool,
+    /// Run the suite twice (flat hybrid vs. reranked) and print a per-category
+    /// delta table — the Phase-16 "done when" A/B.
+    compare_rerank: bool,
 }
 
 struct RunOpts {
@@ -1342,6 +1488,8 @@ fn parse_memeval(
         output: OutputFormat::Markdown,
         out_path: None,
         min_recall: None,
+        rerank: false,
+        compare_rerank: false,
     };
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -1353,6 +1501,8 @@ fn parse_memeval(
             "--min-recall" => {
                 opts.min_recall = Some(next_value(&mut iter, "--min-recall")?.parse()?)
             }
+            "--rerank" => opts.rerank = true,
+            "--compare-rerank" => opts.compare_rerank = true,
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -1490,7 +1640,8 @@ fn print_help() {
          \x20\x20compete    competitive comparison: mneme's measured recall + capability\n\
          \x20\x20             matrix + cited competitor QA scores (Mem0/Zep papers)\n\
          \x20\x20qaeval     end-to-end LLM-judged QA accuracy (retrieve→answer→judge);\n\
-         \x20\x20             real numbers need --llm ollama (--features ollama)\n\
+         \x20\x20             real numbers need --llm ollama (--features ollama) or\n\
+         \x20\x20             --llm openrouter (--features openai, OPENROUTER_API_KEY)\n\
          \x20\x20edge       adversarial / edge-case stress: hard-rule invariants under\n\
          \x20\x20             hostile inputs (exits 1 on any violation — CI gate)\n\
          \x20\x20fetch      download a REAL public benchmark (SQuAD/HotpotQA) + run recall@k\n\
@@ -1519,17 +1670,19 @@ fn print_help() {
          \x20\x20--per-conversation  LOCOMO: canonical per-dialogue scoping (fair protocol)\n\
          \x20\x20--k              top-k retrieved as context       (default: 10)\n\
          \x20\x20--embedder       mock | fastembed                 (default: mock)\n\
-         \x20\x20--llm            demo | ollama                    (default: demo)\n\
+         \x20\x20--llm            demo | ollama | openrouter       (default: demo)\n\
          \n\
          MEMEVAL OPTIONS:\n\
          \x20\x20--suite          locomo | longmemeval             (default: locomo)\n\
          \x20\x20--k              N                                (default: 10)\n\
          \x20\x20--embedder       mock | fastembed                 (default: mock)\n\
+         \x20\x20--rerank         wire the Phase-16 content-aware LexicalReranker\n\
+         \x20\x20--compare-rerank run flat-hybrid vs. reranked A/B (per-category Δ table)\n\
          \x20\x20--min-recall N   exit 1 if recall@k falls below N (0..1)\n\
          \n\
          SHARED OPTIONS:\n\
          \x20\x20--suite          gsm8k | humaneval                (default: gsm8k)\n\
-         \x20\x20--executor       demo | ollama                    (default: demo)\n\
+         \x20\x20--executor       demo | ollama | openrouter       (default: demo)\n\
          \x20\x20--output         csv | json | html | markdown     (default: csv for run, md for compare)\n\
          \x20\x20--out PATH       file to write the output to       (default: stdout)\n\
          \x20\x20--regression-threshold N\n\

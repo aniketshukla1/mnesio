@@ -26,7 +26,9 @@ use mneme_core::event::{Event, LogEntry};
 use mneme_core::traits::MaterializedView;
 use mneme_core::types::{new_id, BiTemporal, MemoryRef, Scope};
 use mneme_core::{Embedder, EventLog, Query, Retriever};
-use mneme_index::{Bm25View, FastEmbedEmbedder, HybridRetriever, MockEmbedder, VectorView};
+use mneme_index::{
+    Bm25View, FastEmbedEmbedder, HybridRetriever, LexicalReranker, MockEmbedder, VectorView,
+};
 use mneme_store::FjallEventLog;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -92,6 +94,20 @@ pub struct MemEvalReport {
     pub recalled: usize,
     pub per_category: Vec<CategoryRecall>,
     pub mean_latency_ms: f64,
+    /// Whether the Phase-16 content-aware [`LexicalReranker`] was wired into
+    /// the retriever for this run.
+    pub rerank: bool,
+}
+
+impl MemEvalReport {
+    /// Recall rate for one category (`0.0` if the suite has no such category).
+    pub fn category_rate(&self, category: &str) -> f32 {
+        self.per_category
+            .iter()
+            .find(|c| c.category == category)
+            .map(|c| c.rate())
+            .unwrap_or(0.0)
+    }
 }
 
 impl MemEvalReport {
@@ -128,136 +144,238 @@ fn build_embedder(choice: &str) -> Result<Arc<dyn Embedder>> {
 }
 
 /// Run a memory-recall benchmark end to end against the real pipeline.
+///
+/// When `rerank` is set, the Phase-16 content-aware [`LexicalReranker`] is
+/// wired as the retriever's final stage (over the [`Bm25View`] as its
+/// `ContentProvider`). It re-scores the over-fetched candidate list on full
+/// text before truncation to `k` — targeting the multi-hop + temporal
+/// categories rank fusion under-serves, without evicting a decisively higher
+/// retrieval signal (so overall recall@k is protected).
 pub async fn run_memeval(
     suite: &MemEvalSuite,
     k: usize,
     embedder_choice: &str,
+    rerank: bool,
 ) -> Result<MemEvalReport> {
-    let scope = Scope::global("bench");
-    let embedder = build_embedder(embedder_choice)?;
-
-    // Real storage + views, in a throwaway temp keyspace.
-    let dir = std::env::temp_dir().join(format!("mneme-memeval-{}", new_id()));
-    let log = FjallEventLog::open(&dir).map_err(|e| anyhow!("open log: {e}"))?;
-    let vector = Arc::new(VectorView::new(
-        embedder.dim(),
-        embedder.model_id().to_string(),
-    ));
-    let bm25 = Arc::new(Bm25View::new().map_err(|e| anyhow!("bm25 init: {e}"))?);
-
-    // --- ingest the haystack ---
-    // Embed inline so the vector view inserts on the synchronous path;
-    // keep an id→content map for recall scoring.
-    let mut content_by_id: HashMap<MemoryRef, String> = HashMap::new();
-    for item in &suite.memories {
-        let vectors = embedder
-            .embed(std::slice::from_ref(&item.content))
-            .await
-            .map_err(|e| anyhow!("embed: {e}"))?;
-        let embedding = vectors.into_iter().next();
-        let mem = Memory {
-            id: new_id(),
-            scope: scope.clone(),
-            content: item.content.clone(),
-            keywords: vec![],
-            tags: item.tags.clone(),
-            context: String::new(),
-            embedding,
-            links: vec![],
-            parent: None,
-            evolution_count: 0,
-            time: BiTemporal::now(),
-            provenance: Provenance {
-                source: "memeval".into(),
-                trust: 1.0,
-            },
-            source: None,
-            position: None,
-        };
-        content_by_id.insert(MemoryRef(mem.id), mem.content.clone());
-        let event = Event::MemoryWritten(mem);
-        let id = log
-            .append(event.clone())
-            .await
-            .map_err(|e| anyhow!("append: {e}"))?;
-        let entry = LogEntry { id, event };
-        vector
-            .apply(&entry)
-            .await
-            .map_err(|e| anyhow!("vector apply: {e}"))?;
-        bm25.apply(&entry)
-            .await
-            .map_err(|e| anyhow!("bm25 apply: {e}"))?;
-    }
-
-    let retriever = HybridRetriever::new(vector, bm25, embedder.clone());
-
-    // --- question loop ---
-    let mut recalled = 0usize;
-    let mut cat: HashMap<String, (usize, usize)> = HashMap::new();
-    let mut total_latency = 0.0f64;
-    for q in &suite.questions {
-        let query = Query {
-            text: q.question.clone(),
-            scope: scope.clone(),
-            k,
-            time_filter: None,
-        };
-        let start = Instant::now();
-        let hits = retriever
-            .search(&query)
-            .await
-            .map_err(|e| anyhow!("search: {e}"))?;
-        total_latency += start.elapsed().as_secs_f64() * 1000.0;
-
-        let needle = q.answer_substring.to_ascii_lowercase();
-        let hit = hits.iter().any(|h| {
-            content_by_id
-                .get(&h.memory)
-                .map(|c| c.to_ascii_lowercase().contains(&needle))
-                .unwrap_or(false)
-        });
-        if hit {
-            recalled += 1;
-        }
-        let e = cat.entry(q.category.clone()).or_insert((0, 0));
-        e.1 += 1;
-        if hit {
-            e.0 += 1;
-        }
-    }
-
-    // Stable, sorted category order for deterministic reports.
-    let mut per_category: Vec<CategoryRecall> = cat
-        .into_iter()
-        .map(|(category, (recalled, total))| CategoryRecall {
-            category,
-            recalled,
-            total,
-        })
-        .collect();
-    per_category.sort_by(|a, b| a.category.cmp(&b.category));
-
-    let total_questions = suite.questions.len();
-    let report = MemEvalReport {
-        suite_name: suite.name.clone(),
-        embedder: embedder_choice.to_string(),
-        k,
-        memory_count: suite.memories.len(),
-        total_questions,
-        recalled,
-        per_category,
-        mean_latency_ms: if total_questions > 0 {
-            total_latency / total_questions as f64
-        } else {
-            0.0
-        },
-    };
-
-    // Best-effort cleanup of the temp keyspace.
-    drop(log);
-    std::fs::remove_dir_all(&dir).ok();
+    let corpus = Corpus::ingest(suite, embedder_choice).await?;
+    let report = corpus.evaluate(suite, k, rerank).await;
+    corpus.cleanup();
     Ok(report)
+}
+
+/// Run the *paired* A/B: ingest the corpus **once**, then evaluate the flat
+/// hybrid and the reranked retriever against that same index.
+///
+/// This pairing is essential for an honest delta. Evaluating the two arms over
+/// separately-built indexes lets HNSW's internal randomness dominate the
+/// per-category numbers on small suites — a query whose candidates all tie on
+/// BM25 (no discriminative term) resolves to a different memory per build, and
+/// that noise gets misread as a reranker effect.
+pub async fn run_memeval_ab(
+    suite: &MemEvalSuite,
+    k: usize,
+    embedder_choice: &str,
+) -> Result<(MemEvalReport, MemEvalReport)> {
+    let corpus = Corpus::ingest(suite, embedder_choice).await?;
+    let base = corpus.evaluate(suite, k, false).await;
+    let reranked = corpus.evaluate(suite, k, true).await;
+    corpus.cleanup();
+    Ok((base, reranked))
+}
+
+/// An ingested haystack: the real log + views, plus the id→content map used
+/// for recall scoring. Built once so several retriever configurations can be
+/// compared against an identical index.
+struct Corpus {
+    vector: Arc<VectorView>,
+    bm25: Arc<Bm25View>,
+    embedder: Arc<dyn Embedder>,
+    embedder_choice: String,
+    content_by_id: HashMap<MemoryRef, String>,
+    scope: Scope,
+    dir: std::path::PathBuf,
+    log: Option<Arc<FjallEventLog>>,
+}
+
+impl Corpus {
+    async fn ingest(suite: &MemEvalSuite, embedder_choice: &str) -> Result<Self> {
+        let scope = Scope::global("bench");
+        let embedder = build_embedder(embedder_choice)?;
+
+        // Real storage + views, in a throwaway temp keyspace.
+        let dir = std::env::temp_dir().join(format!("mneme-memeval-{}", new_id()));
+        let log = FjallEventLog::open(&dir).map_err(|e| anyhow!("open log: {e}"))?;
+        let vector = Arc::new(VectorView::new(
+            embedder.dim(),
+            embedder.model_id().to_string(),
+        ));
+        let bm25 = Arc::new(Bm25View::new().map_err(|e| anyhow!("bm25 init: {e}"))?);
+
+        // --- ingest the haystack ---
+        // Embed inline so the vector view inserts on the synchronous path;
+        // keep an id→content map for recall scoring.
+        let mut content_by_id: HashMap<MemoryRef, String> = HashMap::new();
+        for item in &suite.memories {
+            let vectors = embedder
+                .embed(std::slice::from_ref(&item.content))
+                .await
+                .map_err(|e| anyhow!("embed: {e}"))?;
+            let embedding = vectors.into_iter().next();
+            let mem = Memory {
+                id: new_id(),
+                scope: scope.clone(),
+                content: item.content.clone(),
+                keywords: vec![],
+                tags: item.tags.clone(),
+                context: String::new(),
+                embedding,
+                links: vec![],
+                parent: None,
+                evolution_count: 0,
+                time: BiTemporal::now(),
+                provenance: Provenance {
+                    source: "memeval".into(),
+                    trust: 1.0,
+                },
+                source: None,
+                position: None,
+            };
+            content_by_id.insert(MemoryRef(mem.id), mem.content.clone());
+            let event = Event::MemoryWritten(mem);
+            let id = log
+                .append(event.clone())
+                .await
+                .map_err(|e| anyhow!("append: {e}"))?;
+            let entry = LogEntry { id, event };
+            vector
+                .apply(&entry)
+                .await
+                .map_err(|e| anyhow!("vector apply: {e}"))?;
+            bm25.apply(&entry)
+                .await
+                .map_err(|e| anyhow!("bm25 apply: {e}"))?;
+        }
+
+        Ok(Corpus {
+            vector,
+            bm25,
+            embedder,
+            embedder_choice: embedder_choice.to_string(),
+            content_by_id,
+            scope,
+            dir,
+            log: Some(log),
+        })
+    }
+
+    /// Best-effort removal of the temp keyspace.
+    fn cleanup(mut self) {
+        drop(self.log.take());
+        std::fs::remove_dir_all(&self.dir).ok();
+    }
+
+    /// Score this corpus with the given retriever configuration.
+    async fn evaluate(&self, suite: &MemEvalSuite, k: usize, rerank: bool) -> MemEvalReport {
+        let mut retriever = HybridRetriever::new(
+            self.vector.clone(),
+            self.bm25.clone(),
+            self.embedder.clone(),
+        );
+        if rerank {
+            // Bm25View is the ContentProvider — it has the memory content
+            // STORED, so the reranker can re-score candidates on full text.
+            retriever = retriever.with_reranker(Arc::new(LexicalReranker::new(self.bm25.clone())));
+        }
+        let scope = &self.scope;
+        let content_by_id = &self.content_by_id;
+
+        // --- question loop ---
+        let mut recalled = 0usize;
+        let mut cat: HashMap<String, (usize, usize)> = HashMap::new();
+        let mut total_latency = 0.0f64;
+        for q in &suite.questions {
+            let query = Query {
+                text: q.question.clone(),
+                scope: scope.clone(),
+                k,
+                time_filter: None,
+            };
+            let start = Instant::now();
+            // A retrieval error here means an empty candidate list for this
+            // question — scored as a miss rather than aborting the whole run.
+            let hits = retriever.search(&query).await.unwrap_or_default();
+            total_latency += start.elapsed().as_secs_f64() * 1000.0;
+
+            let needle = q.answer_substring.to_ascii_lowercase();
+            let hit = hits.iter().any(|h| {
+                content_by_id
+                    .get(&h.memory)
+                    .map(|c| c.to_ascii_lowercase().contains(&needle))
+                    .unwrap_or(false)
+            });
+            if hit {
+                recalled += 1;
+            }
+            // Opt-in per-question tracing (MNEME_BENCH_DEBUG=1) — prints the ranked
+            // candidates with their score breakdown so a recall miss can be traced
+            // to the signal that caused it.
+            if std::env::var("MNEME_BENCH_DEBUG").is_ok() && !hit {
+                eprintln!(
+                    "\n[MISS] ({}) {:?}  needle={:?}",
+                    q.category, q.question, q.answer_substring
+                );
+                for (i, h) in hits.iter().enumerate() {
+                    let c = content_by_id
+                        .get(&h.memory)
+                        .map(|s| s.as_str())
+                        .unwrap_or("<?>");
+                    eprintln!(
+                        "   #{i} score={:.4} {:?} :: {}",
+                        h.score,
+                        h.breakdown
+                            .iter()
+                            .map(|(n, v)| format!("{n}={v:.4}"))
+                            .collect::<Vec<_>>(),
+                        &c[..c.len().min(64)]
+                    );
+                }
+            }
+
+            let e = cat.entry(q.category.clone()).or_insert((0, 0));
+            e.1 += 1;
+            if hit {
+                e.0 += 1;
+            }
+        }
+
+        // Stable, sorted category order for deterministic reports.
+        let mut per_category: Vec<CategoryRecall> = cat
+            .into_iter()
+            .map(|(category, (recalled, total))| CategoryRecall {
+                category,
+                recalled,
+                total,
+            })
+            .collect();
+        per_category.sort_by(|a, b| a.category.cmp(&b.category));
+
+        let total_questions = suite.questions.len();
+        MemEvalReport {
+            suite_name: suite.name.clone(),
+            embedder: self.embedder_choice.clone(),
+            k,
+            memory_count: suite.memories.len(),
+            total_questions,
+            recalled,
+            per_category,
+            mean_latency_ms: if total_questions > 0 {
+                total_latency / total_questions as f64
+            } else {
+                0.0
+            },
+            rerank,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -282,21 +400,77 @@ mod tests {
     #[tokio::test]
     async fn recall_on_tiny_suite_is_high_with_mock_embedder() {
         let suite = load_memeval_suite(TINY).unwrap();
-        let report = run_memeval(&suite, 5, "mock").await.unwrap();
+        let report = run_memeval(&suite, 5, "mock", false).await.unwrap();
         assert_eq!(report.total_questions, 3);
         assert_eq!(report.memory_count, 3);
         // BM25 alone recalls keyword-overlapping answers; expect all 3.
         assert_eq!(report.recalled, 3, "recall@5 should find all answers");
         assert!((report.recall() - 1.0).abs() < 1e-6);
+        assert!(!report.rerank);
     }
 
     #[tokio::test]
     async fn report_tracks_per_category() {
         let suite = load_memeval_suite(TINY).unwrap();
-        let report = run_memeval(&suite, 5, "mock").await.unwrap();
+        let report = run_memeval(&suite, 5, "mock", false).await.unwrap();
         assert_eq!(report.per_category.len(), 1);
         assert_eq!(report.per_category[0].category, "single-hop");
         assert_eq!(report.per_category[0].total, 3);
+    }
+
+    /// A LoCoMo-shaped mini suite spanning the categories Phase 16 targets.
+    const RERANK: &str = r#"{
+        "name": "rerank-demo",
+        "description": "multi-hop + temporal disambiguation",
+        "memories": [
+            {"content": "Alice joined Acme as a software engineer", "tags": []},
+            {"content": "Alice was promoted to engineering manager of the payments team", "tags": []},
+            {"content": "Bob leads the payments team hiring effort", "tags": []},
+            {"content": "The payments team shipped instant transfers", "tags": []},
+            {"content": "Quarterly revenue was 10 million dollars in 2021", "tags": []},
+            {"content": "Quarterly revenue was 14 million dollars in 2022", "tags": []},
+            {"content": "Quarterly revenue was 19 million dollars in 2023", "tags": []},
+            {"content": "The company was founded in a garage in Ohio", "tags": []}
+        ],
+        "questions": [
+            {"question": "which team does Alice manage on the payments side as engineering manager", "answer_substring": "engineering manager", "category": "multi-hop"},
+            {"question": "what was quarterly revenue in 2022", "answer_substring": "14 million", "category": "temporal"},
+            {"question": "what was quarterly revenue in 2023", "answer_substring": "19 million", "category": "temporal"},
+            {"question": "where was the company founded", "answer_substring": "Ohio", "category": "single-hop"}
+        ]
+    }"#;
+
+    /// End-to-end guard for the Phase-16 reranker in the *real* pipeline: it
+    /// must never regress recall — overall or in any category — versus flat
+    /// hybrid. (With the offline `mock` embedder the pipeline is BM25-only,
+    /// whose IDF weighting already does distinct-term matching well, so the
+    /// lexical reranker is a safe no-op here; its measurable *lift* is against
+    /// a semantic embedder, where exact term/date matches get drowned out —
+    /// see the `reranked` A/B run with `--embedder fastembed`. The reranker's
+    /// promotion *mechanism* is proven directly in `mneme_index::rerank`.)
+    #[tokio::test]
+    async fn reranker_never_regresses_recall_in_real_pipeline() {
+        let suite = load_memeval_suite(RERANK).unwrap();
+        for k in [1usize, 2, 4] {
+            let base = run_memeval(&suite, k, "mock", false).await.unwrap();
+            let rr = run_memeval(&suite, k, "mock", true).await.unwrap();
+            assert!(rr.rerank && !base.rerank);
+            assert!(
+                rr.recall() >= base.recall() - 1e-6,
+                "overall recall regressed at k={k}: {} -> {}",
+                base.recall(),
+                rr.recall()
+            );
+            for c in &base.per_category {
+                let a = rr.category_rate(&c.category);
+                assert!(
+                    a >= c.rate() - 1e-6,
+                    "category {} regressed at k={k}: {} -> {a}",
+                    c.category,
+                    c.rate()
+                );
+            }
+        }
     }
 
     #[test]

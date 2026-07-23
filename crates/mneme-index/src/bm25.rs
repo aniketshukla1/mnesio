@@ -284,6 +284,26 @@ impl Bm25View {
             .map(|(hits, _)| hits)
     }
 
+    /// Look up the stored content of a single memory by id.
+    ///
+    /// Phase 16 (retrieval parity): the content-aware reranker re-scores
+    /// fused candidates on their full text, so it needs to resolve
+    /// `MemoryRef -> content`. Content is a `STORED` field, so this is a
+    /// one-term lookup — off the write path, only ever on a read. Returns
+    /// `None` if the memory isn't in the live index (never staged, or
+    /// superseded/tombstoned).
+    pub fn content(&self, memory: MemoryRef) -> Option<String> {
+        let searcher = self.reader.searcher();
+        let term = Term::from_field_text(self.fields.memory_id, &memory.0.to_string());
+        let q = TermQuery::new(term, IndexRecordOption::Basic);
+        let top = searcher.search(&q, &TopDocs::with_limit(1)).ok()?;
+        let (_score, addr) = top.into_iter().next()?;
+        let doc: TantivyDocument = searcher.doc(addr).ok()?;
+        doc.get_first(self.fields.content)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    }
+
     /// Same as [`Self::search`] but also returns the [`Bm25Tier`] that
     /// produced the result set. Used by the metrics layer to expose which
     /// fallback tier the user's query landed in.

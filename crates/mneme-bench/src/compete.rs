@@ -288,8 +288,11 @@ pub struct CompeteReport {
 pub async fn run_compete(k: usize, embedder: &str) -> Result<CompeteReport> {
     let locomo = load_memeval_suite(LOCOMO_JSON)?;
     let longmemeval = load_memeval_suite(LONGMEMEVAL_JSON)?;
-    let mneme_locomo = run_memeval(&locomo, k, embedder).await?;
-    let mneme_longmemeval = run_memeval(&longmemeval, k, embedder).await?;
+    // Baseline flat-hybrid retrieval — the compete numbers quote the
+    // long-published configuration, not the Phase-16 reranker (which has its
+    // own A/B demonstration in `memeval --compare-rerank`).
+    let mneme_locomo = run_memeval(&locomo, k, embedder, false).await?;
+    let mneme_longmemeval = run_memeval(&longmemeval, k, embedder, false).await?;
     Ok(CompeteReport {
         k,
         embedder: embedder.to_string(),
