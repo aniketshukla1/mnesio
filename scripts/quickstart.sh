@@ -8,7 +8,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/mneme/mneme/main/scripts/quickstart.sh | bash
 set -euo pipefail
 
-REPO_URL="https://github.com/aniketshukla1/mneme.git"
+REPO_URL="https://github.com/mneme/mneme.git"
 PORT="${MNEME_PORT:-7777}"
 
 info() { printf '\033[36m▸ %s\033[0m\n' "$*"; }

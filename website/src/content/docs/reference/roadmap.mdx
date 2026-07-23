@@ -95,7 +95,7 @@ backends on CPU + GPU, a CI-gated accuracy-parity eval, and erasure-by-recompile
 ### Phase 16 — Retrieval parity ◑ in progress
 This phase keeps **retrieval** competitive with the 2026 leaders on the hard
 LoCoMo / LongMemEval categories by folding two ideas from the
-[competitor tracker](https://github.com/aniketshukla1/mneme/blob/main/COMPETITORS.md)
+[competitor tracker](https://github.com/mneme/mneme/blob/main/COMPETITORS.md)
 into the existing RRF fusion — behind the same seven hard rules. Both components
 are **built and tested** in `mneme-index`, but both are **opt-in**: neither is
 wired into the default retrieval path, because the measured result below does not
@@ -146,5 +146,5 @@ cargo run -p mneme-bench --release -- memeval \
   --suite longmemeval --k 1 --embedder fastembed --compare-rerank
 ```
 
-See [`COMPETITIVE.md`](https://github.com/aniketshukla1/mneme) in the repo for the
+See [`COMPETITIVE.md`](https://github.com/mneme/mneme) in the repo for the
 per-competitor "why they can't copy this" breakdown.

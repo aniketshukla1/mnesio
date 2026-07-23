@@ -375,7 +375,7 @@ fn load_cache(path: &Path) -> Result<Option<MemEvalSuite>> {
 async fn download(spec: &FetchSpec) -> Result<MemEvalSuite> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
-        .user_agent("mneme-bench/0.1 (+https://github.com/aniketshukla1/mneme)")
+        .user_agent("mneme-bench/0.1 (+https://github.com/mneme/mneme)")
         .build()
         .map_err(|e| anyhow!("build http client: {e}"))?;
 

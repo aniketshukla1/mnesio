@@ -23,8 +23,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/aniketshukla1/mneme"
-Repository = "https://github.com/aniketshukla1/mneme"
+Homepage = "https://github.com/mneme/mneme"
+Repository = "https://github.com/mneme/mneme"
 
 [tool.maturin]
 # Bind the package to the cdylib target. maturin will produce a

@@ -41,7 +41,7 @@ function remarkBaseLinks() {
 }
 
 export default defineConfig({
-  site: "https://aniketshukla1.github.io",
+  site: "https://mneme.github.io",
   base: BASE,
   // GFM (tables, strikethrough, task lists) for both .md and .mdx. The MDX
   // integration inherits this markdown config by default.
@@ -60,11 +60,11 @@ export default defineConfig({
         {
           icon: "github",
           label: "GitHub",
-          href: "https://github.com/aniketshukla1/mneme",
+          href: "https://github.com/mneme/mneme",
         },
       ],
       editLink: {
-        baseUrl: "https://github.com/aniketshukla1/mneme/edit/main/website/",
+        baseUrl: "https://github.com/mneme/mneme/edit/main/website/",
       },
       lastUpdated: true,
       sidebar: [

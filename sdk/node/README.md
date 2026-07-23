@@ -1,6 +1,6 @@
 # @mneme/sdk — Node / TypeScript SDK
 
-Thin client for the [mneme](https://github.com/aniketshukla1/mneme) HTTP
+Thin client for the [mneme](https://github.com/mneme/mneme) HTTP
 surface. Zero runtime dependencies; targets Node ≥ 18 (uses the built-in
 global `fetch`).
 

@@ -8,11 +8,11 @@ between `0.x.y` bumps.
 
 ---
 
-## [Unreleased]
+## [0.1.0] — 2026-07-12 — First public release
 
-Work landed since the `0.1.0` notes were written. `0.1.0` has never been
-published to a public remote or to crates.io, so when the launch tag is cut this
-section should be folded into `0.1.0` rather than released separately.
+The open-source launch. The detailed, phase-by-phase record of the engine is
+under **What works in v0.1.0** below; this top section summarises the launch-prep
+work and — importantly — states the known limitations honestly.
 
 ### Added
 - **OpenAI-compatible LLM backend** (`mneme-llm`, `openai` feature) targeting any
@@ -58,10 +58,6 @@ section should be folded into `0.1.0` rather than released separately.
   −10pp overall.
 - **No LoCoMo number is published yet.** The harness and the frontier-model path
   are in place; the run itself is still outstanding.
-
----
-
-## [0.1.0] — 2026-05-25 — First usable release
 
 > **The wedge is real.** mneme's procedural-memory compiler is the first
 > open-source implementation of a GEPA-style reflective loop with a
@@ -185,7 +181,7 @@ TOTAL             : 218 tests · all passing on both feature configs
 ### Try it
 
 ```bash
-git clone https://github.com/aniketshukla1/mneme.git
+git clone https://github.com/mneme/mneme.git
 cd mneme
 MNEME_DEMO=1 MNEME_PROCEDURAL=on cargo run -p mneme-server
 ```
@@ -237,4 +233,4 @@ Embedded references:
 
 ---
 
-[0.1.0]: https://github.com/aniketshukla1/mneme/releases/tag/v0.1.0
+[0.1.0]: https://github.com/mneme/mneme/releases/tag/v0.1.0
