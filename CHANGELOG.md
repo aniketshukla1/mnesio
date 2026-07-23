@@ -8,6 +8,59 @@ between `0.x.y` bumps.
 
 ---
 
+## [Unreleased]
+
+Work landed since the `0.1.0` notes were written. `0.1.0` has never been
+published to a public remote or to crates.io, so when the launch tag is cut this
+section should be folded into `0.1.0` rather than released separately.
+
+### Added
+- **OpenAI-compatible LLM backend** (`mneme-llm`, `openai` feature) targeting any
+  `/v1/chat/completions` gateway and defaulting to OpenRouter, so one key reaches
+  both Claude and GPT models. The API key is read from the environment only.
+  Wired into `mneme-bench` as `--llm openrouter` / `--executor openrouter`.
+- **Phase 16 retrieval components** in `mneme-index`, both **opt-in**:
+  `rerank::LexicalReranker` (a content-aware final stage over a new
+  `ContentProvider` seam, scoring query coverage, temporal date match, phrase
+  overlap, and an update cue, with coverage weighted by candidate-set IDF) and
+  `context_tree::ContextTree` (tag-derived domain/topic hierarchy that routes a
+  query to the best-matching branch and only ever narrows).
+- `mneme-bench memeval --rerank` and `--compare-rerank`, the latter running a
+  *paired* A/B over a single ingested index.
+- Community documentation: `CONTRIBUTING.md`, `SECURITY.md`,
+  `CODE_OF_CONDUCT.md`.
+- GitHub Pages deploy workflow for the docs site, and a
+  "How mneme differs" comparison page.
+
+### Changed
+- Filled in crates.io metadata across all 19 crates; `mneme-py` is marked
+  `publish = false` since it ships to PyPI via maturin.
+- Standardised three inconsistent repository URLs (including the literal
+  `YOURNAME` placeholder in the workspace manifest) onto one.
+- Corrected the README test-count badge to the real total (509).
+
+### Fixed
+- **Benchmark methodology.** The A/B comparison built a separate index per arm,
+  which let HNSW's build randomness dominate per-category deltas on small suites
+  — it reported a 6/12 regression rate that was measurement noise. Arms are now
+  paired against one index, and the `--compare-rerank` CI guard fails on
+  per-category regression rather than only the overall figure.
+- Docs site links: 30 root-absolute markdown links plus the landing page's
+  hero/card links would have 404'd under a project-path deploy.
+- Disabled four placeholder funding links that pointed at accounts which do not
+  exist for this project.
+
+### Known limitations
+- The Phase 16 reranker does **not** meet its "done when" and is therefore not in
+  the default retrieval path. Measured on LongMemEval-mini with `fastembed`:
+  at recall@1, 50/50 runs improved overall and `knowledge-update` went 0% → 100%,
+  but `preference` regressed in 3/50 runs; at recall@3 over 20 runs, 3 regressed
+  −10pp overall.
+- **No LoCoMo number is published yet.** The harness and the frontier-model path
+  are in place; the run itself is still outstanding.
+
+---
+
 ## [0.1.0] — 2026-05-25 — First usable release
 
 > **The wedge is real.** mneme's procedural-memory compiler is the first
