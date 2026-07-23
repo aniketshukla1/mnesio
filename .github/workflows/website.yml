@@ -1,0 +1,64 @@
+name: website
+
+# Builds the Starlight docs site and publishes it to GitHub Pages.
+#
+# One-time setup: repository Settings -> Pages -> Source = "GitHub Actions".
+# Nothing else is required; this workflow needs no secrets.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - ".github/workflows/website.yml"
+  # Allow a manual redeploy from the Actions tab.
+  workflow_dispatch:
+
+# Least privilege: read the repo, write only the Pages deployment.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two deploys at once, but don't cancel one in flight — a
+# half-published site is worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      # `npm ci` needs a lockfile; fall back to `install` so a fresh clone
+      # without one still builds rather than failing the launch.
+      - name: install dependencies
+        working-directory: website
+        run: npm ci || npm install
+
+      - name: build
+        working-directory: website
+        run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/dist
+
+  deploy:
+    name: deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
