@@ -1,0 +1,141 @@
+---
+title: How mneme differs
+description: An honest comparison against the agent-memory field — the seven dimensions we score on, where mneme is genuinely alone, and where we're behind.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+There are roughly ninety agent-memory projects now. Almost all of them are
+**storage-shaped**: they remember facts, and they compete on recall. mneme is
+built on a different bet.
+
+> **The one-line difference:** mneme is not a place to put facts — it is a memory
+> that gets *verifiably* better, can *prove* what it knew and when, and can *take
+> it back*.
+
+Each of those three is a literal, shipped capability, and each is only possible
+because of the substrate: an append-only, replayable, bi-temporal event log with
+a non-bypassable safety gate.
+
+## The seven dimensions
+
+We score the field on the seven axes that actually separate these systems —
+rather than on recall alone, which nearly everyone optimises.
+
+| Code | Dimension | What it means |
+|---|---|---|
+| **GATE** | Non-bypassable safety gate | self-improvement only commits if it passes canaries + a safety probe + a non-negative objective delta |
+| **BITEMP** | Append-only + bi-temporal | immutable log; invalidate-and-supersede, never overwrite or delete |
+| **KV** | Gated KV cartridge | the KV cache as a versioned, gated, erasable view of the log |
+| **PROV** | Provenance + time-travel | trace any belief to its source events; reconstruct state as of any past `T` |
+| **SHRED** | Crypto-shred erasure | forget a subject *on an append-only log* by dropping a per-subject key |
+| **PROC** | Procedural self-improvement | gets better at *tasks*, not just at storing facts |
+| **REPRO** | Reproducible eval | numbers anyone can re-run, with the methodology stated |
+
+✅ has it · ◑ partial or adjacent · ❌ absent
+
+## Scorecard
+
+| System | GATE | BITEMP | KV | PROV | SHRED | PROC | REPRO |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| **mneme** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ gated | ✅ |
+| Mem0 | ❌ | ❌ | ❌ | ◑ | ❌ | ❌ | ❌ |
+| Zep / Graphiti | ❌ | ✅ | ❌ | ◑ | ❌ | ❌ | ◑ |
+| Hindsight | ❌ | ◑ | ❌ | ◑ | ❌ | ◑ reflect | ✅ |
+| MemOS | ❌ | ❌ | ❌ | ◑ | ❌ | ✅ ungated | ◑ |
+| Letta (MemGPT) | ❌ | ❌ | ❌ | ❌ | ❌ | ◑ self-edit | ❌ |
+| Supermemory | ❌ | ◑ | ❌ | ❌ | ◑ forget | ❌ | ❌ |
+| ByteRover 2.0 | ❌ | ◑ | ❌ | ❌ | ❌ | ❌ | ◑ |
+| Cognee | ❌ | ❌ | ❌ | ◑ | ❌ | ❌ | ❌ |
+| LangMem | ❌ | ❌ | ❌ | ❌ | ❌ | ◑ prompt-edit | ❌ |
+
+mneme is the only row filled across all seven. **GATE and SHRED are unmatched by
+every system in the field**, and KV is unmatched as a *governed* view. The full
+per-competitor tracker, including twenty-plus long-tail systems, lives in
+[`COMPETITORS.md`](https://github.com/aniketshukla1/mneme/blob/main/COMPETITORS.md).
+
+<Aside type="caution" title="Where we're behind — read this part">
+**We have not published a LoCoMo number yet.** Competitors have: Mem0 self-reports
+92.5% LoCoMo (an independent evaluation put it at 49.0% on LongMemEval), Zep
+reports 63.8% LongMemEval, ByteRover 92.2% LoCoMo, Hindsight 94.6% LongMemEval
+(reproduced independently — the strongest result in the field).
+
+mneme ships the only reproducible-by-design harness of the group, and the honest
+consequence of that standard is that we don't quote a headline until we've run it
+ourselves end-to-end. Until then, treat the moat claims as the thing to evaluate
+us on, not a recall leaderboard position. See [Benchmarks](/reference/benchmarks/)
+for what *is* measured.
+</Aside>
+
+## Why the differences are structural
+
+The interesting claim isn't that mneme has more features. It's that four of these
+capabilities are **not portable** — a storage-shaped competitor would have to
+rebuild its foundation to copy them.
+
+### 1. Self-improvement that can't quietly get worse
+
+MemOS and LangMem also self-improve. Neither *gates* it. In mneme, nothing
+procedural activates without passing `EvalReport::is_committable()` — canaries at
+100%, safety probe passing, objective delta ≥ 0. This is mechanically enforced:
+setting every configurable threshold to its weakest value still cannot get under
+the baseline, and a dedicated integration test proves it on every commit.
+
+That inversion matters. "Self-improving memory" without a gate is a system that
+can silently regress. With one, improvement is a claim you can check.
+
+### 2. It can prove what it knew, and when
+
+Because the log is append-only and bi-temporal, `snapshot_as_of(T)` reconstructs
+the live memory set *as the agent knew it* at any past `T`, and `provenance()`
+traces any belief back through its source events and supersessions. Systems that
+overwrite a fact on update have destroyed the evidence — they cannot answer "what
+did you believe last March, and why" at any price.
+
+### 3. It can genuinely take it back
+
+Append-only and "delete my data" are in direct tension. mneme resolves it with
+crypto-shred: each subject's content is sealed under its own key, and forgetting
+drops the key. The log stays append-only and its entry count never changes, but
+the content is unrecoverable — including from rebuilt materialized views and from
+historical time-travel reads. No competitor does this on an immutable log.
+
+### 4. The KV cache as a governed view
+
+A KV cartridge in mneme is just another materialized view of the log, keyed by
+`(model_id, quant, rope_config, log_head)` and rebuildable by replay. It only
+serves once it passes the same gate, versions supersede rather than mutate, and
+erasure works by recompiling from a log whose keys have been dropped. Measured at
+suite level, the cartridge answers at least as accurately as per-query text-context
+retrieval while answering **~167–180× faster**.
+
+## What the others are genuinely better at
+
+Being honest about this is more useful than a clean sweep:
+
+- **Hindsight** has the best independently-reproduced accuracy in the field
+  (94.6% LongMemEval) and a strong multi-strategy retrieval + cross-encoder stack.
+- **Zep / Graphiti** is the mature temporal-knowledge-graph product and the
+  closest to mneme on bi-temporality.
+- **Mem0** is the category default: enormous adoption, the easiest on-ramp, and
+  the integration surface most people already know.
+- **Supermemory** and **ByteRover** are ahead on developer time-to-value and
+  MCP-native ergonomics.
+- **MemOS** owns the "self-evolving memory OS" narrative — ungated, but shipping.
+
+We're actively absorbing two of these ideas: Hindsight's multi-strategy retrieval
+with a cross-encoder stage, and ByteRover's hierarchical Context-Tree. Both are
+built in `mneme-index` today and both are **opt-in** — the measured result doesn't
+yet justify switching them on by default. That story, including the regression we
+found, is on the [roadmap](/reference/roadmap/).
+
+## Choosing
+
+Pick mneme if you need memory that is **governed**: auditable, erasable, and
+improvable-with-proof. That's the enterprise/regulated lane, and it's largely
+empty — the industry verdict is that no existing framework provides enterprise
+governance, lineage, or policy compliance.
+
+Pick something else if you need a drop-in fact store with the largest ecosystem
+today and no governance requirement. Mem0 will get you running faster, and that
+is a real advantage we're not going to pretend away.
