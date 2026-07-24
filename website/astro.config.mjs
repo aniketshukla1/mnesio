@@ -3,22 +3,26 @@ import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import remarkGfm from "remark-gfm";
 
-// Deploy target. Defaults to the GitHub Pages *project* site, which the
-// `website.yml` workflow publishes with no extra setup or cost.
+// Deploy target. The site serves at the **root** (`/`). That requires a
+// root-serving Pages target — either a custom domain, or an org/user site repo
+// named `mneme.github.io` — rather than the `github.com/mneme/mneme` *project*
+// path, which GitHub would otherwise serve under `/mneme/`.
 //
-// To move to a custom domain (e.g. https://mneme.dev): set `site` to that
-// origin and set `BASE` below to "". Then add the domain in the repository's
-// Settings → Pages → Custom domain (which writes a CNAME file).
-const BASE = "/mneme";
+// To serve under a project sub-path instead, set `BASE = "/mneme"`; the
+// `remarkBaseLinks` plugin below then prefixes every internal link so nothing
+// 404s. For a custom domain, also set `site` to that origin and add the domain
+// in Settings → Pages → Custom domain (which writes a CNAME file).
+const BASE = "";
 
 /**
  * Prefix root-absolute markdown links with the deploy `base`.
  *
  * Astro rewrites the links *it* generates (assets, the sidebar), but not
- * hand-written `[text](/concepts/foo/)` links in content — those 404 on a
+ * hand-written `[text](/concepts/foo/)` links in content — those would 404 on a
  * project-path deploy. Rewriting them here keeps the content portable: prose
- * stays written against the site root, and switching to a root deploy is a
- * one-line change to `BASE` rather than an edit to every link.
+ * stays written against the site root, and switching between a root and a
+ * sub-path deploy is a one-line change to `BASE` rather than an edit to every
+ * link. A no-op when `BASE` is empty (root deploy).
  *
  * Walks the mdast directly so this needs no extra dependency.
  */
@@ -42,7 +46,7 @@ function remarkBaseLinks() {
 
 export default defineConfig({
   site: "https://mneme.github.io",
-  base: BASE,
+  base: BASE || "/",
   // GFM (tables, strikethrough, task lists) for both .md and .mdx. The MDX
   // integration inherits this markdown config by default.
   markdown: {
