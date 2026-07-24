@@ -97,7 +97,6 @@ export default defineConfig({
           items: [
             { label: "How mneme differs", slug: "reference/comparison" },
             { label: "Benchmarks", slug: "reference/benchmarks" },
-            { label: "Roadmap", slug: "reference/roadmap" },
           ],
         },
       ],

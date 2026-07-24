@@ -126,8 +126,10 @@ Being honest about this is more useful than a clean sweep:
 We're actively absorbing two of these ideas: Hindsight's multi-strategy retrieval
 with a cross-encoder stage, and ByteRover's hierarchical Context-Tree. Both are
 built in `mneme-index` today and both are **opt-in** — the measured result doesn't
-yet justify switching them on by default. That story, including the regression we
-found, is on the [roadmap](/reference/roadmap/).
+yet justify switching them on by default. On LongMemEval-mini with a real
+semantic embedder, the reranker helps at a tight `recall@1` (knowledge-update
+0% → 100%) but regressed a category in a minority of runs at `recall@3`, so it
+stays off the default path until it clears that bar.
 
 ## Choosing
 
