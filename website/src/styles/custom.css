@@ -183,3 +183,120 @@
   color: var(--sl-color-gray-3);
   line-height: 1.35;
 }
+
+/* ---------------------------------------------------------------------------
+   Site footer (org footer rendered by src/components/Footer.astro)
+   Theme-aware via Starlight's CSS variables; spans its content column, stacks
+   on mobile. Kept within the content column (not viewport-bleed) so it never
+   slides under the docs sidebar or triggers horizontal scroll.
+--------------------------------------------------------------------------- */
+.site-footer {
+  margin-top: 4rem;
+  padding: 2.5rem 0 1.5rem;
+  border-top: 1px solid var(--sl-color-hairline, var(--sl-color-gray-5));
+  font-size: var(--sl-text-sm);
+}
+.site-footer__inner {
+  display: grid;
+  grid-template-columns: 1.5fr repeat(4, 1fr);
+  gap: 2rem 1.5rem;
+  max-width: 1120px;
+  margin-inline: auto;
+}
+.site-footer__brand {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 22rem;
+}
+.site-footer__name {
+  font-weight: 700;
+  font-size: 1.25rem;
+  letter-spacing: -0.01em;
+  color: var(--sl-color-white);
+}
+.site-footer__tag {
+  margin: 0;
+  color: var(--sl-color-gray-3);
+  line-height: 1.4;
+}
+.site-footer__gh {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  align-self: flex-start;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 999px;
+  color: var(--sl-color-white);
+  text-decoration: none;
+  font-weight: 600;
+  transition: border-color 0.15s, background 0.15s;
+}
+.site-footer__gh:hover {
+  border-color: var(--sl-color-accent);
+  background: var(--sl-color-gray-6, rgba(255, 255, 255, 0.04));
+}
+.site-footer__cols {
+  display: contents;
+}
+.site-footer__col h2 {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--sl-color-gray-3);
+  margin: 0 0 0.75rem;
+  border: none;
+  padding: 0;
+}
+.site-footer__col ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.site-footer__col a {
+  color: var(--sl-color-gray-2);
+  text-decoration: none;
+}
+.site-footer__col a:hover {
+  color: var(--sl-color-white);
+  text-decoration: underline;
+}
+.site-footer__bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem 1.5rem;
+  max-width: 1120px;
+  margin: 2rem auto 0;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--sl-color-hairline, var(--sl-color-gray-5));
+  color: var(--sl-color-gray-3);
+}
+.site-footer__bar a {
+  color: var(--sl-color-gray-2);
+}
+@media (max-width: 72rem) {
+  .site-footer__inner {
+    grid-template-columns: 1fr 1fr;
+  }
+  .site-footer__cols {
+    display: contents;
+  }
+  .site-footer__brand {
+    grid-column: 1 / -1;
+    max-width: none;
+  }
+}
+@media (max-width: 40rem) {
+  .site-footer__inner {
+    grid-template-columns: 1fr 1fr;
+    gap: 1.75rem 1rem;
+  }
+  .site-footer__bar {
+    flex-direction: column;
+  }
+}

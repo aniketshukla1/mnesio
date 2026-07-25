@@ -1,0 +1,5 @@
+# mnesio docs — allow all crawlers, point them at the sitemap.
+User-agent: *
+Allow: /
+
+Sitemap: https://mnesio.github.io/mnesio/sitemap-index.xml

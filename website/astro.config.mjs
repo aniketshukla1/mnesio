@@ -59,6 +59,33 @@ export default defineConfig({
         "A self-improving long-term memory layer for AI agents — append-only, bi-temporal, erasable, and verifiably better over time.",
       logo: { src: "./src/assets/logo.svg", alt: "mnesio" },
       customCss: ["./src/styles/custom.css"],
+      components: {
+        // Org footer (copyright, license, link columns) on every page.
+        Footer: "./src/components/Footer.astro",
+      },
+      // Social share card (1200×630) for link previews on LinkedIn / X /
+      // Slack / Hacker News. Absolute URL because scrapers don't resolve
+      // relative paths. Update the origin if the site moves to a domain.
+      head: [
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:image",
+            content: "https://mnesio.github.io/mnesio/brand/og.png",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            name: "twitter:image",
+            content: "https://mnesio.github.io/mnesio/brand/og.png",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: { name: "twitter:card", content: "summary_large_image" },
+        },
+      ],
       social: [
         {
           icon: "github",

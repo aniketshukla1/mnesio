@@ -1,0 +1,103 @@
+---
+// Custom site footer (a Starlight component override).
+//
+// On docs pages it renders Starlight's built-in footer first (pagination,
+// "edit this page", last-updated), then the org footer below. On the splash
+// landing page the built-in footer is skipped — only the org footer shows.
+//
+// Links are base-aware via `import.meta.env.BASE_URL`, so they resolve whether
+// the site is served under /mnesio (project Pages) or at a domain root. Only
+// links that actually work today are included — no placeholder legal pages, no
+// registry links to packages that aren't published yet.
+import Default from "@astrojs/starlight/components/Footer.astro";
+import { Icon } from "@astrojs/starlight/components";
+
+const base = import.meta.env.BASE_URL; // "/mnesio/" or "/"
+const repo = "https://github.com/mnesio/mnesio";
+const year = new Date().getFullYear();
+const isSplash =
+  Astro.locals.starlightRoute?.entry?.data?.template === "splash";
+
+const columns = [
+  {
+    title: "Product",
+    links: [
+      { label: "Why mnesio", href: base + "start/why/" },
+      { label: "Getting started", href: base + "start/getting-started/" },
+      { label: "Quickstart (MCP)", href: base + "start/quickstart/" },
+    ],
+  },
+  {
+    title: "Reference",
+    links: [
+      { label: "How mnesio differs", href: base + "reference/comparison/" },
+      { label: "Benchmarks", href: base + "reference/benchmarks/" },
+      { label: "Roadmap", href: base + "reference/roadmap/" },
+      { label: "Architecture", href: base + "concepts/architecture/" },
+    ],
+  },
+  {
+    title: "Community",
+    links: [
+      { label: "GitHub", href: repo },
+      { label: "Discussions", href: repo + "/discussions" },
+      { label: "Contributing", href: repo + "/blob/main/CONTRIBUTING.md" },
+      { label: "Changelog", href: repo + "/blob/main/CHANGELOG.md" },
+    ],
+  },
+  {
+    title: "Project",
+    links: [
+      { label: "Apache-2.0 License", href: repo + "/blob/main/LICENSE" },
+      { label: "Security policy", href: repo + "/blob/main/SECURITY.md" },
+      { label: "Code of Conduct", href: repo + "/blob/main/CODE_OF_CONDUCT.md" },
+    ],
+  },
+];
+---
+
+{!isSplash && <Default {...Astro.props}><slot /></Default>}
+
+<footer class="site-footer not-content">
+  <div class="site-footer__inner">
+    <div class="site-footer__brand">
+      <span class="site-footer__name">mnesio</span>
+      <p class="site-footer__tag">
+        A memory that gets <em>verifiably</em> better — that can prove what it
+        knew, and take it back.
+      </p>
+      <a class="site-footer__gh" href={repo} aria-label="mnesio on GitHub">
+        <Icon name="github" size="1.4rem" />
+        <span>Star on GitHub</span>
+      </a>
+    </div>
+
+    <nav class="site-footer__cols" aria-label="Footer navigation">
+      {
+        columns.map((col) => (
+          <div class="site-footer__col">
+            <h2>{col.title}</h2>
+            <ul>
+              {col.links.map((link) => (
+                <li>
+                  <a href={link.href}>{link.label}</a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      }
+    </nav>
+  </div>
+
+  <div class="site-footer__bar">
+    <span>
+      © {year} mnesio · <a href={repo + "/blob/main/LICENSE"}>Apache-2.0 License</a>
+    </span>
+    <span>
+      Free &amp; open source · built with <a href="https://astro.build">Astro</a>
+      +
+      <a href="https://starlight.astro.build">Starlight</a>
+    </span>
+  </div>
+</footer>
