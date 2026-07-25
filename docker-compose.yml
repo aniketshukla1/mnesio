@@ -1,27 +1,27 @@
-# One command to run mneme with no Rust toolchain installed:
+# One command to run mnesio with no Rust toolchain installed:
 #
 #     docker compose up --build
 #
 # Then open the live dashboard at http://localhost:7777.
 services:
-  mneme:
+  mnesio:
     build: .
-    image: mneme:local
+    image: mnesio:local
     ports:
       - "7777:7777"
     environment:
       # Bind all interfaces inside the container so the published port works.
-      MNEME_HOST: "0.0.0.0"
+      MNESIO_HOST: "0.0.0.0"
       # Instant-demo defaults — zero external downloads on first boot.
-      MNEME_DEMO: "1"
-      MNEME_EMBEDDER: "mock"
-      MNEME_PROCEDURAL: "on"
+      MNESIO_DEMO: "1"
+      MNESIO_EMBEDDER: "mock"
+      MNESIO_PROCEDURAL: "on"
       RUST_LOG: "info"
-      # --- For real, persistent use: set MNEME_DEMO to "0" and MNEME_EMBEDDER
+      # --- For real, persistent use: set MNESIO_DEMO to "0" and MNESIO_EMBEDDER
       #     to "fastembed" (downloads bge-small-en-v1.5 on first run). The log
       #     then persists in the named volume below across restarts. ---
     volumes:
-      - mneme-data:/data
+      - mnesio-data:/data
 
 volumes:
-  mneme-data:
+  mnesio-data:

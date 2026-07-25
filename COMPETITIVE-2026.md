@@ -10,7 +10,7 @@ read. The maintained **per-competitor scorecard + deep profiles** live in
 > own harness, answerer model, and judge, so scores conflict badly across sources
 > (Mem0's own blog claims **92.5%** LoCoMo; ByteRover's leaderboard lists Mem0 at
 > **66.9%**). Treat the leaderboard as marketing until reproduced. That noise is
-> itself a strategic opening for mneme (see Strategy §4).
+> itself a strategic opening for mnesio (see Strategy §4).
 
 ## 0. Why this matters now
 
@@ -39,28 +39,28 @@ LangMem, Supermemory, OpenMemory, TeleMem.
 **3. Profile / user-model memory:** Memobase (evolving structured user profile),
 OpenViking (cross-session modeling + dialectic reasoning), Second Me / Second Brain.
 
-**4. "Memory OS" / self-evolving / procedural (overlap mneme's wedge):**
+**4. "Memory OS" / self-evolving / procedural (overlap mnesio's wedge):**
 - **MemOS** (MemTensor) — the most direct overlap: L1 traces → L2 policies → L3
   world-model → **crystallized skills + cross-task skill reuse**; OpenClaw plugin;
   ~35% token savings; ~75.8% LoCoMo.
 - EverOS, "Agent Knowledge Cycle" (sessions→skills); research: MemSkill, ProcMEM,
   MemRL, Mem-α, EvolveR, MUSE, AgentEvolver, SE-GA.
 
-**5. Schema'd / governed / "trustworthy" memory (overlap mneme's positioning):**
+**5. Schema'd / governed / "trustworthy" memory (overlap mnesio's positioning):**
 - **Memori** (Memori Labs / GibsonAI) — "memory as **data with schema, constraints,
   and history**," from agent traces.
 - **MemPalace** — explicit **temporal validity windows** (`valid_from`/`valid_to`).
 - MemClaw/Caura, CommonGround Kernel (Postgres shared work-record), Hyper / Glia
   (enterprise "company brain" + permissions), **memco** (shared memory layer).
 
-**6. Git-based / append-only / versioned (overlap mneme's substrate):** Memov,
+**6. Git-based / append-only / versioned (overlap mnesio's substrate):** Memov,
 taOSmd (append-only transcript + typed temporal KG), Puppyone (auto-versioning),
 Omnigraph (git-style graph), Mimir (Rust binary, SQLite+FTS5), archon-memory-core.
 
 **7. Decay / forgetting-centric:** PowerMem (Ebbinghaus), Vestige (FSRS-6),
 Suyi/溯忆 (dual-temporal + decay), widemem-ai, archon (active forgetting).
 
-**8. KV-cache / model-level memory (overlap mneme's cartridges):** HERMES (KV cache
+**8. KV-cache / model-level memory (overlap mnesio's cartridges):** HERMES (KV cache
 as hierarchical memory, streaming video), Memory Decoder (pretrained plug-and-play
 memory for LLMs), RecMem; also **PRIME** (predictive-retrieval engine).
 
@@ -80,42 +80,42 @@ OpenClaw/Claude-Code memory plugins, not production layers.)*
 | Supermemory | ~85.4% | MCP-native |
 | Zep / Graphiti | ~75–79.8% | temporal KG; 63.8% LongMemEval |
 | MemOS | ~75.8% | + 35% token savings |
-| **mneme** | **not yet published** | retrieval recall 98.1% SQuAD; LOCOMO QA parked on a frontier answerer |
+| **mnesio** | **not yet published** | retrieval recall 98.1% SQuAD; LOCOMO QA parked on a frontier answerer |
 
-**mneme is currently invisible on the metric buyers read — and behind on it.** The
+**mnesio is currently invisible on the metric buyers read — and behind on it.** The
 SQuAD-100 QA number (66%, local 3B) is a weaker, non-comparable setup. Closing this
 is Tier-1 below.
 
-## 3. Per-pillar threat table — mneme's moat vs the 2026 field
+## 3. Per-pillar threat table — mnesio's moat vs the 2026 field
 
-| mneme pillar | Closest rivals | Matched? |
+| mnesio pillar | Closest rivals | Matched? |
 |---|---|---|
-| **Non-bypassable safety gate** on self-improvement (`is_committable()`) | MemOS, MemSkill, EvolveR | ❌ All self-evolve *freely*; none gate. **mneme-unique.** |
+| **Non-bypassable safety gate** on self-improvement (`is_committable()`) | MemOS, MemSkill, EvolveR | ❌ All self-evolve *freely*; none gate. **mnesio-unique.** |
 | **Append-only + bi-temporal** (invalidate-and-supersede) | Memov, taOSmd (git/append-only); MemPalace, Suyi (temporal validity) | ◑ Partial — git-trace *or* valid-from/to, not all three together. |
 | **Gated KV cartridges** (KV cache as a gated, erasable, versioned view) | HERMES, Memory Decoder | ◑ KV-as-memory exists (video/streaming/pretrained), not as a governed log view. |
-| **Provenance + crypto-shred erasure** on an immutable log | Memori (schema+history), Hyper (permissions) | ❌ "delete API" is common; cryptographic erasure reconciled with append-only is **mneme-unique.** |
+| **Provenance + crypto-shred erasure** on an immutable log | Memori (schema+history), Hyper (permissions) | ❌ "delete API" is common; cryptographic erasure reconciled with append-only is **mnesio-unique.** |
 | **Procedural self-improvement** | **MemOS** (mainstreamed it), ProcMEM, Agent Knowledge Cycle | ⚠️ The *story* is now table stakes; the *gated/verifiable* version is not. |
 | **Eval-as-product / reproducible numbers** | (everyone publishes marketing numbers) | ✅ Open lane — nobody is selling reproducibility. |
 
 **Net:** every individual pillar is being chipped at, but **no competitor has the
 combination**, and two pillars (the gate; crypto-shred-on-append-only) remain
-genuinely unmatched. mneme's moat is the *governed, verifiable substrate*, not raw
+genuinely unmatched. mnesio's moat is the *governed, verifiable substrate*, not raw
 recall accuracy.
 
 ## 4. The threats, named
 
 1. **Leaderboard invisibility + a real accuracy gap.** Everyone has a LoCoMo number;
-   mneme doesn't. This is the #1 commercial problem.
+   mnesio doesn't. This is the #1 commercial problem.
 2. **MemOS commoditized the self-improvement narrative** (and has distribution: an
-   OpenClaw plugin, a paper, MemTensor backing). mneme can no longer lead with
+   OpenClaw plugin, a paper, MemTensor backing). mnesio can no longer lead with
    "self-improving memory" — only with "*safely* self-improving."
 3. **Retrieval moved on.** Hierarchical Context-Tree traversal (ByteRover) and
    reasoning-first ingestion (Honcho) beat flat hybrid+graph on the hard LoCoMo
    categories (multi-hop, temporal).
 4. **Token-efficiency is now a headline metric** (Honcho ~5% context, MemOS 35%
-   savings, Mem0 ~7k tokens/query); mneme doesn't publish a tokens/query number.
+   savings, Mem0 ~7k tokens/query); mnesio doesn't publish a tokens/query number.
 
-## 5. Strategy — how mneme stays ahead
+## 5. Strategy — how mnesio stays ahead
 
 **Pick the lane.** Do **not** chase all 8 categories. Own **"governed, verifiable,
 regulator-grade memory"** — the lane almost no one is contesting while ~80 systems
@@ -124,14 +124,14 @@ fight over recall accuracy and coding-agent UX.
 **Tier 1 — get on the board (non-negotiable):**
 1. Publish a real, reproducible **LoCoMo + LongMemEval** number (the parked
    OpenRouter run). Goal: *credible* (~88–92%), not #1.
-2. Ship **`mneme-bench` as a neutral, reproducible, methodology-printing harness** —
+2. Ship **`mnesio-bench` as a neutral, reproducible, methodology-printing harness** —
    "run every vendor's number yourself." In a field of contradictory self-reported
    scores, **reproducibility is the brand.**
 
 **Tier 2 — make the moat measurable (new axes rivals can't pass):**
 3. **Verifiable-improvement benchmark:** learning curve *with the gate rejecting a
    canary-breaking update* — nobody else can demo "got better AND provably safe."
-4. **Staleness / auto-falsification recovery:** mneme's Phase-11 probes auto-supersede
+4. **Staleness / auto-falsification recovery:** mnesio's Phase-11 probes auto-supersede
    a fact whose probe fails — directly answers Mem0's own admitted gap ("memories
    become confidently wrong").
 5. **Provenance + erasure compliance demo:** "prove what it knew at T, then make a
@@ -144,9 +144,9 @@ fight over recall accuracy and coding-agent UX.
 7. Extend **dreaming** to generate *gated inferences* (Honcho-style), behind the gate.
 8. **Own cost:** zero-LLM write path + KV cartridges → publish a **tokens/query**
    number; lead on "cheapest at scale, with the safety substrate."
-9. **BEAM (1M/10M)** scale eval — mneme's 105k-scale harness is most of the way there.
+9. **BEAM (1M/10M)** scale eval — mnesio's 105k-scale harness is most of the way there.
 
-**Repositioning, one line:** everyone now says "self-improving memory" — only mneme
+**Repositioning, one line:** everyone now says "self-improving memory" — only mnesio
 can say **"self-improving *behind a gate*, that can *prove* what it knew and *take it
 back*, with numbers you can reproduce."** The gate / provenance / erasure are exactly
 the production gaps Mem0's own 2026 essay lists as unsolved.

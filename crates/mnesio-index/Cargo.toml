@@ -1,0 +1,32 @@
+[package]
+name = "mnesio-index"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Retrieval views for mnesio: HNSW vector index, tantivy BM25, and hybrid RRF fusion."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
+
+[features]
+# `fastembed` brings in ort + ONNX runtime + ~30MB of model download on first
+# use. Default-on for production builds; CI / tests can opt out via
+# `cargo test --no-default-features` to keep cold builds fast.
+default = ["fastembed"]
+fastembed = ["dep:fastembed"]
+
+[dependencies]
+mnesio-core.workspace = true
+tokio.workspace = true
+serde.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+hnsw_rs.workspace = true
+tantivy.workspace = true
+simsimd.workspace = true
+ulid.workspace = true
+fastembed = { workspace = true, optional = true }

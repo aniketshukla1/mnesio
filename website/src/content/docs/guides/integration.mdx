@@ -1,27 +1,27 @@
 ---
 title: Agent integration (MCP)
-description: Wire mneme into any MCP-capable agent and verify the round-trip.
+description: Wire mnesio into any MCP-capable agent and verify the round-trip.
 ---
 
 import { Steps, Aside, Tabs, TabItem } from '@astrojs/starlight/components';
 
-mneme integrates with agents over the **Model Context Protocol**. Any client that
+mnesio integrates with agents over the **Model Context Protocol**. Any client that
 can launch an MCP server over stdio — Claude Desktop, OpenClaw, Hermes, custom
 loops — can give its agent persistent, self-improving memory.
 
 ## The contract
 
-`mneme-mcp` is a stdio JSON-RPC server speaking MCP `2024-11-05`. It implements
+`mnesio-mcp` is a stdio JSON-RPC server speaking MCP `2024-11-05`. It implements
 `initialize`, `tools/list`, and `tools/call`, and exposes three tools:
 
 ```jsonc
-mneme_write_memory   // { content, tags? }           -> { id }
-mneme_search         // { query, k? }                 -> { hits: [...] }
-mneme_record_outcome // { task, success, detail? }    -> { ok }
+mnesio_write_memory   // { content, tags? }           -> { id }
+mnesio_search         // { query, k? }                 -> { hits: [...] }
+mnesio_record_outcome // { task, success, detail? }    -> { ok }
 ```
 
-`mneme_search` runs the full hybrid pipeline (HNSW + BM25 + RRF) and returns
-ranked hits with an explainable breakdown. `mneme_record_outcome` feeds the
+`mnesio_search` runs the full hybrid pipeline (HNSW + BM25 + RRF) and returns
+ranked hits with an explainable breakdown. `mnesio_record_outcome` feeds the
 procedural compiler so the agent improves across sessions.
 
 ## Register the server
@@ -31,8 +31,8 @@ procedural compiler so the agent improves across sessions.
 ```jsonc
 {
   "mcpServers": {
-    "mneme": {
-      "command": "/abs/path/to/mneme/target/release/mneme-mcp",
+    "mnesio": {
+      "command": "/abs/path/to/mnesio/target/release/mnesio-mcp",
       "args": []
     }
   }
@@ -43,10 +43,10 @@ procedural compiler so the agent improves across sessions.
 ```jsonc
 {
   "mcpServers": {
-    "mneme": {
-      "command": "/abs/path/to/mneme/target/release/mneme-mcp",
+    "mnesio": {
+      "command": "/abs/path/to/mnesio/target/release/mnesio-mcp",
       "args": [],
-      "env": { "MNEME_DATA_DIR": "/abs/path/to/mneme-data" }
+      "env": { "MNESIO_DATA_DIR": "/abs/path/to/mnesio-data" }
     }
   }
 }
@@ -56,23 +56,23 @@ procedural compiler so the agent improves across sessions.
 
 ## A real agent loop
 
-The pattern that produced mneme's **0% → 83%** agent result is simple and works
+The pattern that produced mnesio's **0% → 83%** agent result is simple and works
 with any tool-calling model:
 
 <Steps>
 
-1. On each user turn, the agent calls `mneme_search` with the query to pull
+1. On each user turn, the agent calls `mnesio_search` with the query to pull
    relevant prior memories into context.
 
 2. The model answers using the retrieved context.
 
-3. Salient facts from the turn are persisted with `mneme_write_memory` for next
-   time; task results go to `mneme_record_outcome`.
+3. Salient facts from the turn are persisted with `mnesio_write_memory` for next
+   time; task results go to `mnesio_record_outcome`.
 
 </Steps>
 
 A reference implementation (stdlib-only Python driving Ollama over the real
-`mneme-mcp` stdio server) lives at `examples/agent_loop_eval.py`. With memory
+`mnesio-mcp` stdio server) lives at `examples/agent_loop_eval.py`. With memory
 **off** the agent answered 0 / 6 private-fact questions; with memory **on**, 5 / 6.
 
 <Aside type="note">
@@ -87,7 +87,7 @@ mechanism, not a leaderboard score.
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-  | ./target/release/mneme-mcp
+  | ./target/release/mnesio-mcp
 ```
 
 For client-specific configs, see [OpenClaw &amp; Hermes](/guides/openclaw-hermes/).

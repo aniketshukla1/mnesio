@@ -1,6 +1,6 @@
 # Keep the Docker build context small + reproducible.
 target/
-mneme-data/
+mnesio-data/
 .fastembed_cache/
 .git/
 **/*.rs.bk
@@ -14,8 +14,8 @@ sdk/node/node_modules/
 sdk/node/dist/
 
 # Downloaded benchmark cache.
-crates/mneme-bench/data/cache/
+crates/mnesio-bench/data/cache/
 
 # Local-only brief documents.
-mneme-project-brief.docx
-mneme-project-brief.txt
+mnesio-project-brief.docx
+mnesio-project-brief.txt

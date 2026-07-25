@@ -1,18 +1,18 @@
 ---
 title: The procedural wedge
-description: How mneme compiles agent outcomes into improved, versioned policy artifacts behind a non-bypassable safety gate.
+description: How mnesio compiles agent outcomes into improved, versioned policy artifacts behind a non-bypassable safety gate.
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
 
-The wedge is the part of mneme that has no equivalent in storage-shaped memory
+The wedge is the part of mnesio that has no equivalent in storage-shaped memory
 systems: the agent doesn't just remember *facts*, it compiles its own *behavior*
 into something measurably better — and the only way that better thing ships is by
 passing an eval gate.
 
 ## The procedural-memory compiler
 
-The primary loop (`mneme-procedural`) turns batches of agent `Outcome`s into
+The primary loop (`mnesio-procedural`) turns batches of agent `Outcome`s into
 improved, versioned `PolicyArtifact`s — system prompts, heuristics, skills, and
 retrieval rules. It's a GEPA-style reflective loop:
 

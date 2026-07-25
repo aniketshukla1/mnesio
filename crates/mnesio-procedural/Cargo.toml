@@ -1,0 +1,30 @@
+[package]
+name = "mnesio-procedural"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The mnesio procedural-memory compiler: turns agent outcomes into gated, versioned policy artifacts."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
+
+[dependencies]
+mnesio-core.workspace = true
+tokio.workspace = true
+serde.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+# Round-trip tests for `Verdict` + `Proposal` (in-memory only — the
+# on-wire format goes through bincode via mnesio-store, but JSON
+# round-trips check the serde shape cheaply).
+serde_json.workspace = true
+# `FakeLlmClient` drives Slice B's reflective-loop unit + integration
+# tests without an external LLM dependency. Default-features off so the
+# `ollama` feature's reqwest tree doesn't leak into the test build.
+mnesio-llm = { workspace = true, default-features = false }

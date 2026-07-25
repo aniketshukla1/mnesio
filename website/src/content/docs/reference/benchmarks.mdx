@@ -1,17 +1,17 @@
 ---
 title: Benchmarks
-description: Every published mneme number, with the exact conditions to reproduce it. No fabricated figures.
+description: Every published mnesio number, with the exact conditions to reproduce it. No fabricated figures.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-This page lists every number mneme publishes, with the conditions under which it
-was measured. The harness that produces them lives in `mneme-bench`. Anything
+This page lists every number mnesio publishes, with the conditions under which it
+was measured. The harness that produces them lives in `mnesio-bench`. Anything
 that comes from a deterministic stand-in is labelled as such and is **not** a
 number we headline.
 
 <Aside type="tip" title="The eval harness is the product">
-mneme treats evaluation as a first-class deliverable, not an afterthought. The
+mnesio treats evaluation as a first-class deliverable, not an afterthought. The
 goal isn't a leaderboard screenshot — it's a harness you can rerun to verify
 every claim on this site.
 </Aside>
@@ -23,7 +23,7 @@ every claim on this site.
 | Recall (SQuAD) | **98.1%** | Hybrid HNSW + BM25 + RRF, fastembed 384-d, top-k retrieval over the SQuAD corpus |
 | Recall@k at scale | **100%** | 105k synthetic memories indexed; recall@k of the planted gold memory |
 
-Retrieval is mneme's strongest, most-reproducible result: the hybrid pipeline
+Retrieval is mnesio's strongest, most-reproducible result: the hybrid pipeline
 finds the right memory essentially every time. This is the foundation the QA
 numbers build on — when QA accuracy is lower, the bottleneck is the *answerer
 model*, not retrieval.
@@ -44,7 +44,7 @@ blocks on an LLM call.
 
 ## Agent task accuracy
 
-A real LLM-driven agent loop over the live `mneme-mcp` stdio server
+A real LLM-driven agent loop over the live `mnesio-mcp` stdio server
 (`examples/agent_loop_eval.py`, Ollama-driven, 6 private-fact questions):
 
 | Memory | Score |
@@ -53,7 +53,7 @@ A real LLM-driven agent loop over the live `mneme-mcp` stdio server
 | On | **5 / 6 (83%)** |
 
 This isolates the *mechanism*: the same agent, same questions, memory toggled.
-Turning mneme on takes a task it cannot do to one it mostly can. It is a small,
+Turning mnesio on takes a task it cannot do to one it mostly can. It is a small,
 reproducible demonstration — not a leaderboard ranking.
 
 ## QA accuracy (LLM-judged)
@@ -68,7 +68,7 @@ QA accuracy needs a model in the loop for both answering and judging. With a
 <Aside type="caution" title="On LOCOMO">
 LOCOMO is a hard long-conversation QA benchmark. We have a real loader and runner
 for the full splits, but a headline LOCOMO score is gated on a frontier-class
-answerer model (the local 3B/7B models are the ceiling, not mneme's retrieval —
+answerer model (the local 3B/7B models are the ceiling, not mnesio's retrieval —
 which scores 98.1% recall). We will publish a LOCOMO number only when it's
 produced by a model we can stand behind, with the standard LLM judge. We do not
 publish a number we can't reproduce.
@@ -105,16 +105,16 @@ recompiles per query), with erasure-by-recompile holding throughout. These run
 the deterministic `FakeKvBackend` so they gate CI; a real generative backend
 through the same harness yields the publishable number (the GPU path's
 token-identical self-consistency makes that parity exact). Reproduce:
-`cargo run -p mneme-bench -- kveval --suite locomo`.
+`cargo run -p mnesio-bench -- kveval --suite locomo`.
 
 ## How to reproduce
 
 ```bash
 # retrieval recall + QA accuracy
-cargo run --release -p mneme-bench -- qaeval --dataset squad --rows 100
+cargo run --release -p mnesio-bench -- qaeval --dataset squad --rows 100
 
 # scale / latency at 105k
-cargo run --release -p mneme-bench -- scale --n 105000
+cargo run --release -p mnesio-bench -- scale --n 105000
 
 # agent loop (needs a running Ollama)
 python examples/agent_loop_eval.py

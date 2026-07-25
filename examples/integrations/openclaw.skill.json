@@ -1,29 +1,29 @@
 {
-  "_comment": "Minimal ClawHub-style skill manifest that exposes mneme as an OpenClaw skill by wrapping its MCP server. Field names follow the common skill/MCP-wrapper shape; adjust to your OpenClaw/ClawHub version's schema. The three tools mirror mneme-mcp exactly.",
-  "name": "mneme-memory",
+  "_comment": "Minimal ClawHub-style skill manifest that exposes mnesio as an OpenClaw skill by wrapping its MCP server. Field names follow the common skill/MCP-wrapper shape; adjust to your OpenClaw/ClawHub version's schema. The three tools mirror mnesio-mcp exactly.",
+  "name": "mnesio-memory",
   "version": "0.1.0",
   "description": "Self-improving long-term memory for the agent: write/search memories and record task outcomes that feed a safety-gated procedural compiler. Versioned, bi-temporal, crypto-shred erasable.",
-  "homepage": "https://github.com/your-org/mneme",
+  "homepage": "https://github.com/your-org/mnesio",
   "type": "mcp",
   "mcp": {
     "transport": "stdio",
-    "command": "/abs/path/to/mneme/target/release/mneme-mcp",
+    "command": "/abs/path/to/mnesio/target/release/mnesio-mcp",
     "args": [],
-    "env": { "MNEME_DATA": "/var/lib/mneme", "MNEME_EMBEDDER": "fastembed" }
+    "env": { "MNESIO_DATA": "/var/lib/mnesio", "MNESIO_EMBEDDER": "fastembed" }
   },
   "tools": [
     {
-      "name": "mneme_write_memory",
+      "name": "mnesio_write_memory",
       "summary": "Append a memory (embedding + evolution happen async, off the write path).",
       "arguments": { "content": "string (required)", "tenant": "string (optional scope)" }
     },
     {
-      "name": "mneme_search",
+      "name": "mnesio_search",
       "summary": "Hybrid retrieval (vector + BM25 + RRF); returns memories + citations.",
       "arguments": { "query": "string (required)", "tenant": "string", "k": "integer" }
     },
     {
-      "name": "mneme_record_outcome",
+      "name": "mnesio_record_outcome",
       "summary": "Record a task outcome; the gated procedural compiler learns from it.",
       "arguments": {
         "artifacts_used": "string[] (required)",

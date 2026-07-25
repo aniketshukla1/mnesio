@@ -1,9 +1,9 @@
 {
-  "name": "mneme-website",
+  "name": "mnesio-website",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Marketing landing page + documentation for mneme.",
+  "description": "Marketing landing page + documentation for mnesio.",
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",

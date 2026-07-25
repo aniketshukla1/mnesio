@@ -2,7 +2,7 @@
 
 ## Our standard
 
-mneme is a technical project and we want it to be a good place to do technical
+mnesio is a technical project and we want it to be a good place to do technical
 work. Everyone participating — in issues, pull requests, discussions, and any
 other project space — is expected to be respectful and constructive.
 

@@ -1,15 +1,15 @@
 ---
-title: How mneme differs
-description: An honest comparison against the agent-memory field — the seven dimensions we score on, where mneme is genuinely alone, and where we're behind.
+title: How mnesio differs
+description: An honest comparison against the agent-memory field — the seven dimensions we score on, where mnesio is genuinely alone, and where we're behind.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 There are roughly ninety agent-memory projects now. Almost all of them are
-**storage-shaped**: they remember facts, and they compete on recall. mneme is
+**storage-shaped**: they remember facts, and they compete on recall. mnesio is
 built on a different bet.
 
-> **The one-line difference:** mneme is not a place to put facts — it is a memory
+> **The one-line difference:** mnesio is not a place to put facts — it is a memory
 > that gets *verifiably* better, can *prove* what it knew and when, and can *take
 > it back*.
 
@@ -38,7 +38,7 @@ rather than on recall alone, which nearly everyone optimises.
 
 | System | GATE | BITEMP | KV | PROV | SHRED | PROC | REPRO |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
-| **mneme** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ gated | ✅ |
+| **mnesio** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ gated | ✅ |
 | Mem0 | ❌ | ❌ | ❌ | ◑ | ❌ | ❌ | ❌ |
 | Zep / Graphiti | ❌ | ✅ | ❌ | ◑ | ❌ | ❌ | ◑ |
 | Hindsight | ❌ | ◑ | ❌ | ◑ | ❌ | ◑ reflect | ✅ |
@@ -49,10 +49,10 @@ rather than on recall alone, which nearly everyone optimises.
 | Cognee | ❌ | ❌ | ❌ | ◑ | ❌ | ❌ | ❌ |
 | LangMem | ❌ | ❌ | ❌ | ❌ | ❌ | ◑ prompt-edit | ❌ |
 
-mneme is the only row filled across all seven. **GATE and SHRED are unmatched by
+mnesio is the only row filled across all seven. **GATE and SHRED are unmatched by
 every system in the field**, and KV is unmatched as a *governed* view. The full
 per-competitor tracker, including twenty-plus long-tail systems, lives in
-[`COMPETITORS.md`](https://github.com/mneme/mneme/blob/main/COMPETITORS.md).
+[`COMPETITORS.md`](https://github.com/mnesio/mnesio/blob/main/COMPETITORS.md).
 
 <Aside type="caution" title="Where we're behind — read this part">
 **We have not published a LoCoMo number yet.** Competitors have: Mem0 self-reports
@@ -60,7 +60,7 @@ per-competitor tracker, including twenty-plus long-tail systems, lives in
 reports 63.8% LongMemEval, ByteRover 92.2% LoCoMo, Hindsight 94.6% LongMemEval
 (reproduced independently — the strongest result in the field).
 
-mneme ships the only reproducible-by-design harness of the group, and the honest
+mnesio ships the only reproducible-by-design harness of the group, and the honest
 consequence of that standard is that we don't quote a headline until we've run it
 ourselves end-to-end. Until then, treat the moat claims as the thing to evaluate
 us on, not a recall leaderboard position. See [Benchmarks](/reference/benchmarks/)
@@ -69,13 +69,13 @@ for what *is* measured.
 
 ## Why the differences are structural
 
-The interesting claim isn't that mneme has more features. It's that four of these
+The interesting claim isn't that mnesio has more features. It's that four of these
 capabilities are **not portable** — a storage-shaped competitor would have to
 rebuild its foundation to copy them.
 
 ### 1. Self-improvement that can't quietly get worse
 
-MemOS and LangMem also self-improve. Neither *gates* it. In mneme, nothing
+MemOS and LangMem also self-improve. Neither *gates* it. In mnesio, nothing
 procedural activates without passing `EvalReport::is_committable()` — canaries at
 100%, safety probe passing, objective delta ≥ 0. This is mechanically enforced:
 setting every configurable threshold to its weakest value still cannot get under
@@ -94,7 +94,7 @@ did you believe last March, and why" at any price.
 
 ### 3. It can genuinely take it back
 
-Append-only and "delete my data" are in direct tension. mneme resolves it with
+Append-only and "delete my data" are in direct tension. mnesio resolves it with
 crypto-shred: each subject's content is sealed under its own key, and forgetting
 drops the key. The log stays append-only and its entry count never changes, but
 the content is unrecoverable — including from rebuilt materialized views and from
@@ -102,7 +102,7 @@ historical time-travel reads. No competitor does this on an immutable log.
 
 ### 4. The KV cache as a governed view
 
-A KV cartridge in mneme is just another materialized view of the log, keyed by
+A KV cartridge in mnesio is just another materialized view of the log, keyed by
 `(model_id, quant, rope_config, log_head)` and rebuildable by replay. It only
 serves once it passes the same gate, versions supersede rather than mutate, and
 erasure works by recompiling from a log whose keys have been dropped. Measured at
@@ -116,7 +116,7 @@ Being honest about this is more useful than a clean sweep:
 - **Hindsight** has the best independently-reproduced accuracy in the field
   (94.6% LongMemEval) and a strong multi-strategy retrieval + cross-encoder stack.
 - **Zep / Graphiti** is the mature temporal-knowledge-graph product and the
-  closest to mneme on bi-temporality.
+  closest to mnesio on bi-temporality.
 - **Mem0** is the category default: enormous adoption, the easiest on-ramp, and
   the integration surface most people already know.
 - **Supermemory** and **ByteRover** are ahead on developer time-to-value and
@@ -125,7 +125,7 @@ Being honest about this is more useful than a clean sweep:
 
 We're actively absorbing two of these ideas: Hindsight's multi-strategy retrieval
 with a cross-encoder stage, and ByteRover's hierarchical Context-Tree. Both are
-built in `mneme-index` today and both are **opt-in** — the measured result doesn't
+built in `mnesio-index` today and both are **opt-in** — the measured result doesn't
 yet justify switching them on by default. On LongMemEval-mini with a real
 semantic embedder, the reranker helps at a tight `recall@1` (knowledge-update
 0% → 100%) but regressed a category in a minority of runs at `recall@3`, so it
@@ -133,7 +133,7 @@ stays off the default path until it clears that bar.
 
 ## Choosing
 
-Pick mneme if you need memory that is **governed**: auditable, erasable, and
+Pick mnesio if you need memory that is **governed**: auditable, erasable, and
 improvable-with-proof. That's the enterprise/regulated lane, and it's largely
 empty — the industry verdict is that no existing framework provides enterprise
 governance, lineage, or policy compliance.

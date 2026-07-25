@@ -5,21 +5,21 @@ description: Drop-in MCP configs for the OpenClaw and Hermes agent runtimes, plu
 
 import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
-OpenClaw and Hermes both speak MCP, so mneme plugs in the same way it does for
-any MCP client: point the runtime at the `mneme-mcp` binary. Ready-to-copy
+OpenClaw and Hermes both speak MCP, so mnesio plugs in the same way it does for
+any MCP client: point the runtime at the `mnesio-mcp` binary. Ready-to-copy
 configs live in the repo under `examples/integrations/`.
 
 <Aside type="note">
 These are configuration snippets you add to your own OpenClaw/Hermes install.
-mneme runs the MCP server as a subprocess of the agent runtime — there's nothing
+mnesio runs the MCP server as a subprocess of the agent runtime — there's nothing
 to host separately.
 </Aside>
 
 ## Build the binary
 
 ```bash
-cargo build --release -p mneme-mcp
-# -> target/release/mneme-mcp
+cargo build --release -p mnesio-mcp
+# -> target/release/mnesio-mcp
 ```
 
 ## Configure the runtime
@@ -30,10 +30,10 @@ cargo build --release -p mneme-mcp
 // examples/integrations/hermes.mcp.json
 {
   "mcpServers": {
-    "mneme": {
-      "command": "/abs/path/to/mneme/target/release/mneme-mcp",
+    "mnesio": {
+      "command": "/abs/path/to/mnesio/target/release/mnesio-mcp",
       "args": [],
-      "env": { "MNEME_DATA_DIR": "/abs/path/to/mneme-data" }
+      "env": { "MNESIO_DATA_DIR": "/abs/path/to/mnesio-data" }
     }
   }
 }
@@ -44,10 +44,10 @@ cargo build --release -p mneme-mcp
 // examples/integrations/openclaw.mcp.json
 {
   "mcpServers": {
-    "mneme": {
-      "command": "/abs/path/to/mneme/target/release/mneme-mcp",
+    "mnesio": {
+      "command": "/abs/path/to/mnesio/target/release/mnesio-mcp",
       "args": [],
-      "env": { "MNEME_DATA_DIR": "/abs/path/to/mneme-data" }
+      "env": { "MNESIO_DATA_DIR": "/abs/path/to/mnesio-data" }
     }
   }
 }
@@ -58,8 +58,8 @@ cargo build --release -p mneme-mcp
 // examples/integrations/openclaw.skill.json — teach the agent when to use memory
 {
   "name": "long-term-memory",
-  "description": "Persist and recall facts across sessions via mneme.",
-  "tools": ["mneme_search", "mneme_write_memory", "mneme_record_outcome"],
+  "description": "Persist and recall facts across sessions via mnesio.",
+  "tools": ["mnesio_search", "mnesio_write_memory", "mnesio_record_outcome"],
   "guidance": "Search memory before answering anything that may depend on prior context; write salient new facts after each turn."
 }
 ```
@@ -69,20 +69,20 @@ cargo build --release -p mneme-mcp
 ## Verify
 
 After registering, confirm the runtime can see the three tools
-(`mneme_write_memory`, `mneme_search`, `mneme_record_outcome`). You can sanity
+(`mnesio_write_memory`, `mnesio_search`, `mnesio_record_outcome`). You can sanity
 check the server independently:
 
 ```bash
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-  | ./target/release/mneme-mcp
+  | ./target/release/mnesio-mcp
 ```
 
 <Aside type="caution" title="On running third-party agents">
-mneme ships the integration *configs and a verified MCP handshake*, not a bundled
+mnesio ships the integration *configs and a verified MCP handshake*, not a bundled
 copy of any third-party agent runtime. Install OpenClaw/Hermes yourself from
-their upstream sources and review them before granting tool access — mneme's job
+their upstream sources and review them before granting tool access — mnesio's job
 is to be a safe, well-behaved MCP server, not to vouch for an agent runtime.
 </Aside>
 

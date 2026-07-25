@@ -1,18 +1,18 @@
-// @mneme/sdk — TypeScript client for mneme's HTTP surface.
+// @mnesio/sdk — TypeScript client for mnesio's HTTP surface.
 //
 // Zero runtime dependencies: relies on the global `fetch` shipped by
-// Node ≥ 18. The DTOs mirror what `mneme-server` returns under
-// crates/mneme-server/src/viz.rs; keep them in sync when fields evolve.
+// Node ≥ 18. The DTOs mirror what `mnesio-server` returns under
+// crates/mnesio-server/src/viz.rs; keep them in sync when fields evolve.
 //
 // The wedge in one call:
-//   const client = new MnemeClient({ baseUrl: "http://localhost:7777" });
+//   const client = new MnesioClient({ baseUrl: "http://localhost:7777" });
 //   const skills = await client.skills();          // gated PolicyArtifacts
 //   const results = await client.search("…", 5);   // hybrid retrieval
 //   // Prepend skills[0].injection to your prompt, then send memories
 //   // as context — same model gets a *gated-improved* skill on every call.
 
 /** Server connection options. */
-export interface MnemeClientOptions {
+export interface MnesioClientOptions {
   /** e.g. "http://127.0.0.1:7777". No trailing slash required. */
   baseUrl: string;
   /** Optional bearer token; reserved for future auth wiring. */
@@ -127,7 +127,7 @@ export interface IngestMetrics {
 }
 
 /** Thin error class so callers can `instanceof`. */
-export class MnemeError extends Error {
+export class MnesioError extends Error {
   constructor(
     message: string,
     /** HTTP status, or 0 if the request never made it to the wire. */
@@ -136,20 +136,20 @@ export class MnemeError extends Error {
     public readonly body?: string,
   ) {
     super(message);
-    this.name = "MnemeError";
+    this.name = "MnesioError";
   }
 }
 
-/** Client for the mneme HTTP surface. Stateless; safe to share. */
-export class MnemeClient {
+/** Client for the mnesio HTTP surface. Stateless; safe to share. */
+export class MnesioClient {
   private readonly baseUrl: string;
   private readonly token?: string;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
 
-  constructor(opts: MnemeClientOptions) {
+  constructor(opts: MnesioClientOptions) {
     if (!opts.baseUrl) {
-      throw new Error("MnemeClient: baseUrl is required");
+      throw new Error("MnesioClient: baseUrl is required");
     }
     this.baseUrl = opts.baseUrl.replace(/\/$/, "");
     this.token = opts.token;
@@ -157,7 +157,7 @@ export class MnemeClient {
     this.fetchImpl = opts.fetch ?? globalThis.fetch;
     if (!this.fetchImpl) {
       throw new Error(
-        "MnemeClient: no global fetch found. Use Node 18+ or pass `fetch` in options.",
+        "MnesioClient: no global fetch found. Use Node 18+ or pass `fetch` in options.",
       );
     }
   }
@@ -235,8 +235,8 @@ export class MnemeClient {
       const res = await this.fetchImpl(url, { signal: controller.signal, headers });
       const text = await res.text();
       if (!res.ok) {
-        throw new MnemeError(
-          `mneme ${path} returned HTTP ${res.status}`,
+        throw new MnesioError(
+          `mnesio ${path} returned HTTP ${res.status}`,
           res.status,
           text,
         );
@@ -244,16 +244,16 @@ export class MnemeClient {
       try {
         return JSON.parse(text) as T;
       } catch (parseErr) {
-        throw new MnemeError(
-          `mneme ${path} returned non-JSON: ${(parseErr as Error).message}`,
+        throw new MnesioError(
+          `mnesio ${path} returned non-JSON: ${(parseErr as Error).message}`,
           res.status,
           text,
         );
       }
     } catch (err) {
-      if (err instanceof MnemeError) throw err;
+      if (err instanceof MnesioError) throw err;
       const msg = (err as Error).message ?? String(err);
-      throw new MnemeError(`mneme ${path} request failed: ${msg}`, 0);
+      throw new MnesioError(`mnesio ${path} request failed: ${msg}`, 0);
     } finally {
       clearTimeout(timer);
     }

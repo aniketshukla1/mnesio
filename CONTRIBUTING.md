@@ -1,6 +1,6 @@
-# Contributing to mneme
+# Contributing to mnesio
 
-Thanks for considering a contribution. mneme is a self-improving long-term
+Thanks for considering a contribution. mnesio is a self-improving long-term
 memory layer for AI agents, and it has a couple of conventions that are stricter
 than the average Rust project. They exist for a reason — please read this before
 opening a PR.
@@ -104,7 +104,7 @@ features. The current phase map lives in the [roadmap](website/src/content/docs/
 ## Reporting bugs
 
 Open an issue with the smallest reproduction you can manage — ideally a failing
-test. Include the mneme version or commit, your OS, and the relevant feature
+test. Include the mnesio version or commit, your OS, and the relevant feature
 flags, since several subsystems (KV backends, real crypto, embedders) are behind
 feature gates and behave differently.
 

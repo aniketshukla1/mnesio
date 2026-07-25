@@ -1,11 +1,11 @@
-# Funding sources for mneme — GitHub renders these as the "Sponsor" button on the repo.
+# Funding sources for mnesio — GitHub renders these as the "Sponsor" button on the repo.
 # Docs: https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
 #
 # NOTE: create each account before relying on its link — a Sponsor button that
 # points at a page which doesn't exist yet will 404. Remove any platform you
 # don't use.
 
-github: [mneme]            # GitHub Sponsors — enable at https://github.com/sponsors (0% platform fee)
-open_collective: mneme     # https://opencollective.com/mneme   (transparent budget; create the collective)
-ko_fi: mneme               # https://ko-fi.com/mneme            (one-off tips)
-liberapay: mneme           # https://liberapay.com/mneme        (recurring, non-profit — optional)
+github: [mnesio]            # GitHub Sponsors — enable at https://github.com/sponsors (0% platform fee)
+open_collective: mnesio     # https://opencollective.com/mnesio   (transparent budget; create the collective)
+ko_fi: mnesio               # https://ko-fi.com/mnesio            (one-off tips)
+liberapay: mnesio           # https://liberapay.com/mnesio        (recurring, non-profit — optional)

@@ -1,57 +1,57 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/mneme-core",
-    "crates/mneme-store",
-    "crates/mneme-index",
-    "crates/mneme-graph",
-    "crates/mneme-extract",
-    "crates/mneme-privacy",
-    "crates/mneme-llm",
-    "crates/mneme-evolve",
-    "crates/mneme-procedural",
-    "crates/mneme-causal",
-    "crates/mneme-probe",
-    "crates/mneme-kv",
-    "crates/mneme-exchange",
-    "crates/mneme-dream",
-    "crates/mneme-provenance",
-    "crates/mneme-server",
-    "crates/mneme-bench",
-    "crates/mneme-mcp",
-    "crates/mneme-py",
+    "crates/mnesio-core",
+    "crates/mnesio-store",
+    "crates/mnesio-index",
+    "crates/mnesio-graph",
+    "crates/mnesio-extract",
+    "crates/mnesio-privacy",
+    "crates/mnesio-llm",
+    "crates/mnesio-evolve",
+    "crates/mnesio-procedural",
+    "crates/mnesio-causal",
+    "crates/mnesio-probe",
+    "crates/mnesio-kv",
+    "crates/mnesio-exchange",
+    "crates/mnesio-dream",
+    "crates/mnesio-provenance",
+    "crates/mnesio-server",
+    "crates/mnesio-bench",
+    "crates/mnesio-mcp",
+    "crates/mnesio-py",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/mneme/mneme"
-homepage = "https://github.com/mneme/mneme"
+repository = "https://github.com/mnesio/mnesio"
+homepage = "https://github.com/mnesio/mnesio"
 keywords = ["memory", "agents", "llm", "rag", "ai"]
 categories = ["database-implementations", "data-structures"]
 rust-version = "1.79"
 
 [workspace.dependencies]
 # --- internal crates ---
-mneme-core = { path = "crates/mneme-core" }
-mneme-store = { path = "crates/mneme-store" }
-mneme-index = { path = "crates/mneme-index" }
-mneme-graph = { path = "crates/mneme-graph" }
-mneme-extract = { path = "crates/mneme-extract" }
-mneme-privacy = { path = "crates/mneme-privacy" }
-mneme-llm = { path = "crates/mneme-llm", default-features = false }
-mneme-evolve = { path = "crates/mneme-evolve" }
-mneme-procedural = { path = "crates/mneme-procedural" }
-mneme-causal = { path = "crates/mneme-causal" }
-mneme-probe = { path = "crates/mneme-probe" }
-mneme-kv = { path = "crates/mneme-kv" }
-mneme-exchange = { path = "crates/mneme-exchange" }
-mneme-dream = { path = "crates/mneme-dream" }
-mneme-provenance = { path = "crates/mneme-provenance" }
-mneme-bench = { path = "crates/mneme-bench" }
-mneme-mcp = { path = "crates/mneme-mcp" }
-mneme-py = { path = "crates/mneme-py" }
+mnesio-core = { path = "crates/mnesio-core" }
+mnesio-store = { path = "crates/mnesio-store" }
+mnesio-index = { path = "crates/mnesio-index" }
+mnesio-graph = { path = "crates/mnesio-graph" }
+mnesio-extract = { path = "crates/mnesio-extract" }
+mnesio-privacy = { path = "crates/mnesio-privacy" }
+mnesio-llm = { path = "crates/mnesio-llm", default-features = false }
+mnesio-evolve = { path = "crates/mnesio-evolve" }
+mnesio-procedural = { path = "crates/mnesio-procedural" }
+mnesio-causal = { path = "crates/mnesio-causal" }
+mnesio-probe = { path = "crates/mnesio-probe" }
+mnesio-kv = { path = "crates/mnesio-kv" }
+mnesio-exchange = { path = "crates/mnesio-exchange" }
+mnesio-dream = { path = "crates/mnesio-dream" }
+mnesio-provenance = { path = "crates/mnesio-provenance" }
+mnesio-bench = { path = "crates/mnesio-bench" }
+mnesio-mcp = { path = "crates/mnesio-mcp" }
+mnesio-py = { path = "crates/mnesio-py" }
 
 # --- foundation (see architecture report, "Rust Crate Survey") ---
 tokio = { version = "1", features = ["full"] }
@@ -73,11 +73,11 @@ hnsw_rs = "0.3"
 simsimd = "6"
 fastembed = "5"
 
-# --- viz / server (mneme-server only) ---
+# --- viz / server (mnesio-server only) ---
 axum = "0.7"
 tower-http = { version = "0.5", features = ["trace"] }
 
-# --- HTTP client (mneme-llm 'ollama' feature only) ---
+# --- HTTP client (mnesio-llm 'ollama' feature only) ---
 # `rustls-tls` keeps us off OpenSSL / native cert store, which makes the
 # crate trivially buildable on every platform CI runs on.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

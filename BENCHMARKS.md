@@ -1,6 +1,6 @@
-# mneme benchmarks — the "best memory layer" case, with real numbers
+# mnesio benchmarks — the "best memory layer" case, with real numbers
 
-This file consolidates **measured** numbers from mneme's own harness (`mneme-bench`)
+This file consolidates **measured** numbers from mnesio's own harness (`mnesio-bench`)
 plus the live GPU/LLM runs, alongside **cited** competitor numbers from their
 papers. Everything here is reproducible from the commands shown; nothing is
 hand-waved.
@@ -8,15 +8,15 @@ hand-waved.
 > **Read the metric labels.** Two different things get measured in this space and
 > they are *not interchangeable*:
 > - **recall@k** — does a top-`k` retrieval contain the gold memory? A
->   retrieval-quality proxy. mneme measures this through its *real*
+>   retrieval-quality proxy. mnesio measures this through its *real*
 >   ingest→retrieve pipeline.
 > - **QA accuracy / LLM-as-judge** — did the agent *answer* correctly given the
->   retrieved context? An end-to-end metric. mneme measures this live via Ollama;
+>   retrieved context? An end-to-end metric. mnesio measures this live via Ollama;
 >   competitor figures below are cited from their papers.
 >
 > Where numbers come from different setups (model, judge, split) they are **not
 > directly comparable** — they're shown to map the landscape, not to claim a
-> head-to-head win on someone else's metric. mneme's actual differentiator is the
+> head-to-head win on someone else's metric. mnesio's actual differentiator is the
 > **capability matrix** (§2) and the **self-improvement loop** (§7), not a recall
 > bake-off.
 
@@ -24,14 +24,14 @@ hand-waved.
 
 ## 1. TL;DR
 
-| Axis | mneme (measured) | Notes |
+| Axis | mnesio (measured) | Notes |
 |---|---|---|
 | Write path | **append p50 ~0.0017 ms, flat from 1k→105k** | Hard Rule #5; embedding/evolution are async, off the path |
 | Query latency @105k | **p50 3.60 ms, p99 4.90 ms** | HNSW, sub-linear growth |
 | Retrieval recall@10 @105k | **100%** (exact-gold needles, mock embedder) | deterministic synthetic corpus |
 | Retrieval recall@10, real data | **98.1% SQuAD**, 99.2% @5k synthetic (fastembed) | real semantic embedder |
 | End-to-end QA (LLM-judged) | **66% SQuAD-100** (real); 100% LOCOMO/LongMemEval-mini | llama3.2 3B (local Ollama); SQuAD-100 is the honest headline |
-| **Real LLM agent loop** | **0% → 83%** with mneme (private facts) | llama3.2 decides its own tool calls over real MCP; see §5.1 |
+| **Real LLM agent loop** | **0% → 83%** with mnesio (private facts) | llama3.2 decides its own tool calls over real MCP; see §5.1 |
 | GPU KV cartridge (0.5B) | **107× warm prefill vs CPU** (same f32) | Apple M1 Pro, Metal |
 | GPU KV cartridge (1.5B) | **~1577× prefill** (Metal bf16 3.34 ms vs CPU f32 5.27 s) | stacks GPU + bf16; see §6 |
 | KV cartridge quantization | **q8 = 4.0× smaller**, same answer | 1.18 MB → 0.30 MB |
@@ -40,9 +40,9 @@ hand-waved.
 
 ## 2. The capability matrix (the real differentiator)
 
-Storage-shaped memory (Mem0, Zep, Letta, Cognee, A-MEM) remembers facts. mneme
+Storage-shaped memory (Mem0, Zep, Letta, Cognee, A-MEM) remembers facts. mnesio
 adds the things they don't have. See the full matrix + per-row evidence in
-[README.md → "How mneme compares"](README.md#️-how-mneme-compares). The rows that
+[README.md → "How mnesio compares"](README.md#️-how-mnesio-compares). The rows that
 matter:
 
 - **Procedural self-improvement behind a non-bypassable safety gate** — outcomes
@@ -59,7 +59,7 @@ matter:
 ## 3. Substrate at scale (mock embedder, deterministic)
 
 ```bash
-cargo run -p mneme-bench --release -- scale --sizes 1000,10000,50000,100000 --embedder mock
+cargo run -p mnesio-bench --release -- scale --sizes 1000,10000,50000,100000 --embedder mock
 ```
 
 | Memories | Append/s | Append p50 | Index/s | Index p50 | Query p50 | Query p99 | recall@10 |
@@ -82,7 +82,7 @@ run-to-run noise.)
 ## 4. Retrieval recall on **real** public data
 
 ```bash
-cargo run -p mneme-bench --release --features fetch -- fetch --dataset squad --embedder fastembed
+cargo run -p mnesio-bench --release --features fetch -- fetch --dataset squad --embedder fastembed
 ```
 
 | Dataset | Embedder | recall@10 |
@@ -100,7 +100,7 @@ With a real semantic embedder the write path still stays fast (append p50
 
 ```bash
 # retrieve context → an LLM answers → an LLM judges (needs a local Ollama)
-cargo run -p mneme-bench --release --features ollama -- qaeval --suite locomo
+cargo run -p mnesio-bench --release --features ollama -- qaeval --suite locomo
 ```
 
 | Suite | n | Embedder | Judge / Answerer | QA accuracy | ms/q |
@@ -116,7 +116,7 @@ retrieve → LLM-answer → LLM-judge pipeline. 66% reflects a small local 3B mo
 answerer to raise the ceiling. Reproduce:
 
 ```bash
-cargo run -p mneme-bench --release --features fetch,ollama -- \
+cargo run -p mnesio-bench --release --features fetch,ollama -- \
   qaeval --dataset squad --rows 100 --embedder fastembed --llm ollama
 ```
 
@@ -139,12 +139,12 @@ multi-session-dialogue shape differs from the SQuAD/HotpotQA QA shape the
 ### 5.1 Real LLM agent loop — does memory make a *real agent* better?
 
 The most honest end-to-end test: a real LLM agent that **decides its own tool
-calls**, talking to the **real `mneme-mcp` server over stdio** (the same
+calls**, talking to the **real `mnesio-mcp` server over stdio** (the same
 transport OpenClaw/Hermes use), answering questions about **private facts the
-base model cannot know** (synthetic codenames, regions, dates seeded into mneme).
+base model cannot know** (synthetic codenames, regions, dates seeded into mnesio).
 
 ```bash
-# needs Ollama running + `cargo build -p mneme-mcp --release`
+# needs Ollama running + `cargo build -p mnesio-mcp --release`
 python3 examples/agent_loop_eval.py
 ```
 
@@ -153,14 +153,14 @@ Measured live (llama3.2 via Ollama, 6 private-fact questions, ~54 s):
 | Condition | Correct | Accuracy |
 |---|---:|---:|
 | **without memory** | 0 / 6 | **0%** |
-| **with mneme** (agent calls `mneme_search`) | 5 / 6 | **83%** |
+| **with mnesio** (agent calls `mnesio_search`) | 5 / 6 | **83%** |
 | **memory lift** | | **+83 pp** |
 
 Without memory the model correctly answers "I don't know" to every private fact;
-with mneme it searches, recovers the fact, and answers. The one miss was a
+with mnesio it searches, recovers the fact, and answers. The one miss was a
 small-model artifact (llama3.2-3B emitted a malformed tool-call as plain text on
 one question, so no search ran) — not a memory failure; every time the model
-actually called the tool, mneme returned the fact and the answer was correct.
+actually called the tool, mnesio returned the fact and the answer was correct.
 This is the wedge made concrete: **a real agent goes from 0% to 83% purely
 because of the memory layer**, with the model — not a script — driving the tools.
 
@@ -186,7 +186,7 @@ baseline. The clean same-precision number is the 0.5B 107×.
 
 ```bash
 # reproduce (downloads the model on first run; needs Apple Metal)
-cargo test -p mneme-kv --release --features candle-kv,metal -- --ignored --nocapture
+cargo test -p mnesio-kv --release --features candle-kv,metal -- --ignored --nocapture
 ```
 
 ---
@@ -194,11 +194,11 @@ cargo test -p mneme-kv --release --features candle-kv,metal -- --ignored --nocap
 ## 7. The wedge — procedural self-improvement (gated)
 
 The point storage-shaped memory can't reach: the agent gets **verifiably better**.
-Outcomes (`mneme_record_outcome`) feed a GEPA-style compiler that proposes K
+Outcomes (`mnesio_record_outcome`) feed a GEPA-style compiler that proposes K
 candidate policy artifacts, shadow-evaluates them, and **commits only if
 `EvalReport::is_committable()`** (canaries + safety probe + Δobjective ≥ 0). The
 learning curve over generations + the safety floor are live at
-`/dashboard` (Phase 2 panel) and asserted by `mneme-bench`'s suite. A
+`/dashboard` (Phase 2 panel) and asserted by `mnesio-bench`'s suite. A
 canary-breaking proposal is *rejected* — improvement never trades away safety.
 
 See [INTEGRATION.md](INTEGRATION.md) for the agent-side loop and
@@ -210,11 +210,11 @@ it without rebuilding its foundation.
 ## 8. Reproduce everything
 
 ```bash
-cargo run -p mneme-bench --release -- scale --sizes 1000,10000,50000,100000 --embedder mock
-cargo run -p mneme-bench --release --features fetch  -- fetch  --dataset squad --embedder fastembed
-cargo run -p mneme-bench --release --features ollama -- qaeval --suite locomo
-cargo run -p mneme-bench --release -- compare --suite locomo
-cargo test  -p mneme-kv   --release --features candle-kv,metal -- --ignored --nocapture
+cargo run -p mnesio-bench --release -- scale --sizes 1000,10000,50000,100000 --embedder mock
+cargo run -p mnesio-bench --release --features fetch  -- fetch  --dataset squad --embedder fastembed
+cargo run -p mnesio-bench --release --features ollama -- qaeval --suite locomo
+cargo run -p mnesio-bench --release -- compare --suite locomo
+cargo test  -p mnesio-kv   --release --features candle-kv,metal -- --ignored --nocapture
 ```
 
 ## 9. Honesty / caveats

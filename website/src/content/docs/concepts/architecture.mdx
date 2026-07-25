@@ -1,11 +1,11 @@
 ---
 title: Architecture
-description: The append-only event log, materialized views, and the trait seams that keep mneme's providers swappable.
+description: The append-only event log, materialized views, and the trait seams that keep mnesio's providers swappable.
 ---
 
 import { Aside, CardGrid, Card } from '@astrojs/starlight/components';
 
-mneme has one organizing idea: **the event log is the single system of record,
+mnesio has one organizing idea: **the event log is the single system of record,
 and everything else is a materialized view of it.** Get that, and the rest of
 the system follows.
 
@@ -73,26 +73,26 @@ without touching the core:
 ## Crate map
 
 ```
-mneme-core        types + traits, no I/O — the shared vocabulary
-mneme-store       fjall-backed event log + view plumbing
-mneme-index       hnsw_rs vector + tantivy BM25 + hybrid retriever
-mneme-evolve      A-MEM-style bounded evolution worker
-mneme-procedural  the procedural-memory compiler (the wedge)
-mneme-graph       bi-temporal property graph view
-mneme-extract     ingestion: extract + consolidate facts
-mneme-causal      counterfactual contribution scoring + GC
-mneme-probe       acceptance probes + falsification
-mneme-kv          gated KV cartridges (KV cache as a view)
-mneme-exchange    certified skill import/export
-mneme-dream       negative memory + offline consolidation
-mneme-provenance  time-travel snapshots + provenance chains
-mneme-mcp         MCP server (stdio JSON-RPC)
-mneme-py          pyo3 Python bindings
-mneme-bench       eval-as-product harness
-mneme-server      host process; HTTP API + dashboard
+mnesio-core        types + traits, no I/O — the shared vocabulary
+mnesio-store       fjall-backed event log + view plumbing
+mnesio-index       hnsw_rs vector + tantivy BM25 + hybrid retriever
+mnesio-evolve      A-MEM-style bounded evolution worker
+mnesio-procedural  the procedural-memory compiler (the wedge)
+mnesio-graph       bi-temporal property graph view
+mnesio-extract     ingestion: extract + consolidate facts
+mnesio-causal      counterfactual contribution scoring + GC
+mnesio-probe       acceptance probes + falsification
+mnesio-kv          gated KV cartridges (KV cache as a view)
+mnesio-exchange    certified skill import/export
+mnesio-dream       negative memory + offline consolidation
+mnesio-provenance  time-travel snapshots + provenance chains
+mnesio-mcp         MCP server (stdio JSON-RPC)
+mnesio-py          pyo3 Python bindings
+mnesio-bench       eval-as-product harness
+mnesio-server      host process; HTTP API + dashboard
 ```
 
-Start reading the source at `mneme-core` — `event.rs` (system of record) and
+Start reading the source at `mnesio-core` — `event.rs` (system of record) and
 `traits.rs` (the seams) define everything else.
 
 Next: [the seven hard rules](/concepts/hard-rules/) that the whole design defends.

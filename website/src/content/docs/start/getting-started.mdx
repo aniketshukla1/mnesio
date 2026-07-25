@@ -1,11 +1,11 @@
 ---
 title: Getting started
-description: Run mneme in one command — Docker, a Makefile target, or from source.
+description: Run mnesio in one command — Docker, a Makefile target, or from source.
 ---
 
 import { Steps, Aside, Tabs, TabItem } from '@astrojs/starlight/components';
 
-mneme is a Rust workspace. The fastest way to see it running is Docker (no
+mnesio is a Rust workspace. The fastest way to see it running is Docker (no
 toolchain) or a single `make` target; building from source is the third option.
 Every path lands you on the same live dashboard at `http://localhost:7777`.
 
@@ -15,18 +15,18 @@ Builds and runs the server in a container and serves the live dashboard with
 **zero external downloads** on first boot (mock embedder + synthetic writer):
 
 ```bash
-git clone https://github.com/mneme/mneme.git && cd mneme
+git clone https://github.com/mnesio/mnesio.git && cd mnesio
 docker compose up --build
 ```
 
-Open `http://localhost:7777`. For real, persistent use, set `MNEME_DEMO=0` and
-`MNEME_EMBEDDER=fastembed` in `docker-compose.yml` (fastembed downloads
-`bge-small-en-v1.5` on first run; the log persists in the `mneme-data` volume).
+Open `http://localhost:7777`. For real, persistent use, set `MNESIO_DEMO=0` and
+`MNESIO_EMBEDDER=fastembed` in `docker-compose.yml` (fastembed downloads
+`bge-small-en-v1.5` on first run; the log persists in the `mnesio-data` volume).
 
 ## With Rust installed — one word
 
 ```bash
-git clone https://github.com/mneme/mneme.git && cd mneme
+git clone https://github.com/mnesio/mnesio.git && cd mnesio
 make demo     # instant demo: live dashboard, zero downloads (mock embedder + learning curve)
 ```
 
@@ -51,8 +51,8 @@ Other targets (`make` on its own lists them all):
 2. Clone and build the workspace:
 
    ```bash
-   git clone https://github.com/mneme/mneme.git
-   cd mneme
+   git clone https://github.com/mnesio/mnesio.git
+   cd mnesio
    cargo build --release
    ```
 
@@ -68,15 +68,15 @@ Other targets (`make` on its own lists them all):
 
 ## Run the server + dashboard
 
-The host process (`mneme-server`, binary name `mneme`) exposes an HTTP API and a
+The host process (`mnesio-server`, binary name `mnesio`) exposes an HTTP API and a
 live dashboard.
 
 ```bash
 # Real embeddings (fastembed, 384-d) — downloads bge-small on first run:
-cargo run --release -p mneme-server
+cargo run --release -p mnesio-server
 
 # Or offline/instant with the deterministic mock embedder (no download):
-MNEME_EMBEDDER=mock cargo run --release -p mneme-server
+MNESIO_EMBEDDER=mock cargo run --release -p mnesio-server
 ```
 
 Open `http://localhost:7777`. The dashboard surfaces live panels for retrieval
@@ -84,27 +84,27 @@ metrics, memory evolution, the procedural learning curve, and each frontier
 phase (causal, probe, KV, exchange, dream, provenance).
 
 <Aside type="tip">
-Add `MNEME_DEMO=1` for a fresh temp data dir plus a synthetic writer, and
-`MNEME_PROCEDURAL=on` to spawn the procedural compiler worker. The default build
+Add `MNESIO_DEMO=1` for a fresh temp data dir plus a synthetic writer, and
+`MNESIO_PROCEDURAL=on` to spawn the procedural compiler worker. The default build
 uses deterministic stand-ins so everything runs offline; point the LLM-backed
-features at a running Ollama with `MNEME_EVOLVE_LLM=ollama`.
+features at a running Ollama with `MNESIO_EVOLVE_LLM=ollama`.
 </Aside>
 
 ### Key environment variables
 
 | Env var | Default | Meaning |
 | --- | --- | --- |
-| `MNEME_PORT` | `7777` | HTTP listen port |
-| `MNEME_HOST` | `127.0.0.1` | Bind address; the Docker image sets `0.0.0.0` |
-| `MNEME_DATA` | `./mneme-data` | Path to the fjall keyspace |
-| `MNEME_EMBEDDER` | `fastembed` | `mock` for the 32-d deterministic embedder (no download) |
-| `MNEME_DEMO` | `0` | `1` → temp data dir + synthetic writer |
-| `MNEME_PROCEDURAL` | `off` | `on` → spawn the procedural compiler worker |
+| `MNESIO_PORT` | `7777` | HTTP listen port |
+| `MNESIO_HOST` | `127.0.0.1` | Bind address; the Docker image sets `0.0.0.0` |
+| `MNESIO_DATA` | `./mnesio-data` | Path to the fjall keyspace |
+| `MNESIO_EMBEDDER` | `fastembed` | `mock` for the 32-d deterministic embedder (no download) |
+| `MNESIO_DEMO` | `0` | `1` → temp data dir + synthetic writer |
+| `MNESIO_PROCEDURAL` | `off` | `on` → spawn the procedural compiler worker |
 
 ## Storage layout
 
-mneme persists to a single append-only event log (fjall-backed) plus its
-materialized views. By default it lives under `./mneme-data`. Because the log is
+mnesio persists to a single append-only event log (fjall-backed) plus its
+materialized views. By default it lives under `./mnesio-data`. Because the log is
 the single system of record, **every index is rebuildable by replaying events** —
 deleting a view directory and restarting reconstructs it.
 
@@ -114,19 +114,19 @@ deleting a view directory and restarting reconstructs it.
   <TabItem label="Local LLM">
 ```bash
 # route evolution / procedural / qaeval through a local Ollama model
-cargo run --release -p mneme-server --features ollama
+cargo run --release -p mnesio-server --features ollama
 ```
   </TabItem>
   <TabItem label="Real crypto">
 ```bash
 # ChaCha20-Poly1305 keyring + ed25519 skill certificates
-cargo run --release -p mneme-server --features aead,ed25519
+cargo run --release -p mnesio-server --features aead,ed25519
 ```
   </TabItem>
   <TabItem label="GPU KV">
 ```bash
-# candle/Metal GPU backend for KV cartridges (also needs MNEME_KV_GPU=1)
-MNEME_KV_GPU=1 cargo run --release -p mneme-server --features candle-kv,metal
+# candle/Metal GPU backend for KV cartridges (also needs MNESIO_KV_GPU=1)
+MNESIO_KV_GPU=1 cargo run --release -p mnesio-server --features candle-kv,metal
 ```
   </TabItem>
 </Tabs>

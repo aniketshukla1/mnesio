@@ -1,18 +1,18 @@
 ---
-title: Why mneme
-description: What makes mneme different from storage-shaped agent-memory systems — the procedural wedge behind a non-bypassable safety gate.
+title: Why mnesio
+description: What makes mnesio different from storage-shaped agent-memory systems — the procedural wedge behind a non-bypassable safety gate.
 ---
 
 import { Aside, CardGrid, Card } from '@astrojs/starlight/components';
 
 Most agent-memory systems — Mem0, Zep, Letta, Cognee, A-MEM — are
 **storage-shaped**: they remember facts, then retrieve them. That's table
-stakes, and mneme does it well (hybrid HNSW + BM25 retrieval, 98.1% recall on
+stakes, and mnesio does it well (hybrid HNSW + BM25 retrieval, 98.1% recall on
 SQuAD). But remembering facts is not the differentiator.
 
 ## The wedge: procedural self-improvement
 
-mneme's bet is that the agent should get **better at doing things** over time —
+mnesio's bet is that the agent should get **better at doing things** over time —
 not just accumulate more facts. Two loops make that happen:
 
 <CardGrid>
@@ -33,7 +33,7 @@ not just accumulate more facts. Two loops make that happen:
 
 Self-improving systems have a failure mode the papers gloss over — the
 **Alignment Tipping Process**, where an agent that edits its own behavior
-gradually drifts off its guardrails. mneme's answer is a hard invariant:
+gradually drifts off its guardrails. mnesio's answer is a hard invariant:
 
 <Aside type="caution" title="Hard Rule #1">
 Nothing procedural commits without passing `EvalReport::is_committable()`:
@@ -41,13 +41,13 @@ canaries pass + safety probe holds + non-negative objective delta. No
 exceptions, no "temporary" bypass. A canary-breaking change is **rejected**.
 </Aside>
 
-This is what lets mneme ship the frontier features safely — causal credit
+This is what lets mnesio ship the frontier features safely — causal credit
 assignment, self-falsifying memory, certified skill exchange — without letting
 self-modification become self-sabotage.
 
 ## Three promises, made literal
 
-mneme is not a place to put facts. It is:
+mnesio is not a place to put facts. It is:
 
 - **A memory that gets *verifiably* better** — a positive learning curve on an
   agent suite, with no safety-probe regression, gated commit by gated commit.
@@ -67,5 +67,5 @@ Safe self-improvement needs the gate. A system built around mutable rows would
 have to rebuild its foundation to add any one of these. That foundation is the
 moat.
 
-Next: [Getting started](/start/getting-started/) to build mneme from source, or
+Next: [Getting started](/start/getting-started/) to build mnesio from source, or
 [the architecture](/concepts/architecture/) for how the substrate fits together.

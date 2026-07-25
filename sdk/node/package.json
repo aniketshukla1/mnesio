@@ -1,7 +1,7 @@
 {
-  "name": "@mneme/sdk",
+  "name": "@mnesio/sdk",
   "version": "0.1.0",
-  "description": "TypeScript SDK for mneme — self-improving long-term memory for AI agents.",
+  "description": "TypeScript SDK for mnesio — self-improving long-term memory for AI agents.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -31,11 +31,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mneme/mneme.git",
+    "url": "https://github.com/mnesio/mnesio.git",
     "directory": "sdk/node"
   },
   "keywords": [
-    "mneme",
+    "mnesio",
     "memory",
     "agents",
     "llm",

@@ -5,7 +5,7 @@ description: Treat the KV cache as a materialized view of the log — precompute
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 
-A **KV cartridge** is one of mneme's frontier bets (Phase 12): instead of
+A **KV cartridge** is one of mnesio's frontier bets (Phase 12): instead of
 re-reading a long memory context through the model on every query, you compile
 the relevant memories' attention key/value state **once** into a cartridge, then
 reuse it. The cartridge is *just another materialized view of the log* — keyed
@@ -16,7 +16,7 @@ The cartridge substrate (keying, versioning, gate-before-activation,
 crypto-shred-by-recompile) is complete and tested, and the open-weights tensor
 backend is delivered: real **GPT-2** (incl. real q8 quant) and **Qwen2.5** in
 pure Rust *and* on Metal GPU — all behind the `KvBackend` trait. A suite-level
-**accuracy-parity** eval (`mneme-bench kveval`) shows the cartridge answers at
+**accuracy-parity** eval (`mnesio-bench kveval`) shows the cartridge answers at
 least as accurately as per-query text-context retrieval (~167–180× faster), with
 erasure holding. The default build still ships the dependency-free
 `FakeKvBackend`; the real backends are feature-gated and fetch weights on first
@@ -65,7 +65,7 @@ conditions. See [Benchmarks](/reference/benchmarks/) for the full table.
 
 <Aside type="note" title="Why bf16, not f16, for deep models">
 f16 has a narrow exponent range; deep models overflow it in the residual stream.
-mneme's GPU path uses **bf16** for deep models and a **mixed-precision residual**
+mnesio's GPU path uses **bf16** for deep models and a **mixed-precision residual**
 (f32 accumulation) so accuracy holds. That's why the headline 1.5B speedup is
 quoted as bf16-vs-cpu-f32 — it's the configuration that actually preserves quality.
 </Aside>

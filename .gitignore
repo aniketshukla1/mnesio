@@ -1,4 +1,5 @@
 /target
+/mnesio-data
 /mneme-data
 **/*.rs.bk
 Cargo.lock
@@ -6,8 +7,8 @@ Cargo.lock
 # Runtime cache the fastembed crate downloads on first run (~100MB).
 .fastembed_cache/
 # Project-brief source documents (kept locally, not part of the source release).
-mneme-project-brief.docx
-mneme-project-brief.txt
+mnesio-project-brief.docx
+mnesio-project-brief.txt
 CLAUDE.md
 
 # Node SDK build artifacts
@@ -16,8 +17,8 @@ sdk/node/dist/
 sdk/node/package-lock.json
 sdk/node/.last_build_hash
 
-# Downloaded benchmark cache (mneme-bench fetch)
-crates/mneme-bench/data/cache/
+# Downloaded benchmark cache (mnesio-bench fetch)
+crates/mnesio-bench/data/cache/
 
 # Website (Astro + Starlight) build artifacts
 website/node_modules/
@@ -28,7 +29,7 @@ website/package-lock.json
 # Local agent/editor tooling config — not part of the published project
 .claude/
 
-# Secrets — never commit. mneme reads all API keys from the environment only.
+# Secrets — never commit. mnesio reads all API keys from the environment only.
 .env
 .env.*
 !.env.example

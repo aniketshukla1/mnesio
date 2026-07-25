@@ -1,12 +1,12 @@
 {
-  "_comment": "Hermes (Nous Research) MCP server config. Drop the `mneme` entry into your Hermes `mcp_servers` config (Hermes auto-reloads on change). Build first: `cargo build -p mneme-mcp --release`. Point MNEME_DATA at a persistent dir to keep memory across runs; share the same dir across agents to share memory. Hermes' selective tool-loading can expose a subset of the three tools.",
+  "_comment": "Hermes (Nous Research) MCP server config. Drop the `mnesio` entry into your Hermes `mcp_servers` config (Hermes auto-reloads on change). Build first: `cargo build -p mnesio-mcp --release`. Point MNESIO_DATA at a persistent dir to keep memory across runs; share the same dir across agents to share memory. Hermes' selective tool-loading can expose a subset of the three tools.",
   "mcp_servers": {
-    "mneme": {
-      "command": "/abs/path/to/mneme/target/release/mneme-mcp",
+    "mnesio": {
+      "command": "/abs/path/to/mnesio/target/release/mnesio-mcp",
       "args": [],
       "env": {
-        "MNEME_DATA": "/var/lib/mneme",
-        "MNEME_EMBEDDER": "fastembed"
+        "MNESIO_DATA": "/var/lib/mnesio",
+        "MNESIO_EMBEDDER": "fastembed"
       }
     }
   }

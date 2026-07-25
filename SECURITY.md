@@ -15,18 +15,18 @@ Please include:
 - the commit or version, your OS, and any feature flags in play — several
   subsystems are feature-gated and behave differently.
 
-You can expect an acknowledgement within a few days. Since mneme is a
+You can expect an acknowledgement within a few days. Since mnesio is a
 pre-1.0 project maintained in the open, please allow reasonable time for a fix
 before disclosing publicly, and tell us if you have a disclosure deadline.
 
 ## Supported versions
 
-mneme is pre-1.0. Only the latest release on `main` receives security fixes;
+mnesio is pre-1.0. Only the latest release on `main` receives security fixes;
 there are no maintained backport branches yet. That will change when 1.0 ships.
 
 ## What we consider a security issue
 
-mneme makes a small number of security-relevant promises. A break in any of them
+mnesio makes a small number of security-relevant promises. A break in any of them
 is a vulnerability, not a bug:
 
 - **Scope isolation.** A `Scope` is a security boundary. Any path that reads or
@@ -48,7 +48,7 @@ is a vulnerability, not a bug:
 
 ## Credentials
 
-mneme reads all provider API keys **from the environment only** — never from a
+mnesio reads all provider API keys **from the environment only** — never from a
 constructor argument, a command-line flag, or a config file, and they are never
 written to the log or to any materialized view. If you find a path where a key is
 persisted, logged, or echoed, please report it.
@@ -60,8 +60,8 @@ reproduction seems to need them, say so and we'll work out a safe alternative.
 
 Things that are **not** vulnerabilities on their own:
 
-- Running the demo/dashboard bound to `0.0.0.0`. That is opt-in via `MNEME_HOST`
-  and documented; mneme ships no authentication layer and is intended to run
+- Running the demo/dashboard bound to `0.0.0.0`. That is opt-in via `MNESIO_HOST`
+  and documented; mnesio ships no authentication layer and is intended to run
   behind your own trust boundary. If you expose it publicly, put an
   authenticating proxy in front.
 - Resource exhaustion from deliberately unbounded configuration (for example,

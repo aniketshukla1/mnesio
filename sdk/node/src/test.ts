@@ -1,10 +1,10 @@
-// Tests for @mneme/sdk. Uses Node's built-in test runner — zero
+// Tests for @mnesio/sdk. Uses Node's built-in test runner — zero
 // external test deps. Drives the client against a stub `fetch` so the
-// suite runs offline (no running mneme-server required).
+// suite runs offline (no running mnesio-server required).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MnemeClient, MnemeError } from "./index.js";
+import { MnesioClient, MnesioError } from "./index.js";
 
 /**
  * Build a stub fetch that responds with a fixed JSON body for the path
@@ -33,19 +33,19 @@ function stubFetch(routes: Record<string, unknown>): {
 }
 
 test("constructor rejects empty baseUrl", () => {
-  assert.throws(() => new MnemeClient({ baseUrl: "" }));
+  assert.throws(() => new MnesioClient({ baseUrl: "" }));
 });
 
 test("constructor strips trailing slash from baseUrl", async () => {
   const stub = stubFetch({ "/api/search": searchFixture() });
-  const c = new MnemeClient({ baseUrl: "http://h:7/", fetch: stub.fetch });
+  const c = new MnesioClient({ baseUrl: "http://h:7/", fetch: stub.fetch });
   await c.search("revenue");
   assert.ok(stub.calls[0].startsWith("http://h:7/api/search"));
 });
 
 test("search composes q + k + optional actor", async () => {
   const stub = stubFetch({ "/api/search": searchFixture() });
-  const c = new MnemeClient({ baseUrl: "http://h:7", fetch: stub.fetch });
+  const c = new MnesioClient({ baseUrl: "http://h:7", fetch: stub.fetch });
   await c.search("hello world", 8, { actor: "scout" });
   const url = stub.calls[0];
   assert.match(url, /q=hello\+world/);
@@ -70,7 +70,7 @@ test("skills() returns parsed body", async () => {
       ],
     },
   });
-  const c = new MnemeClient({ baseUrl: "http://h:7", fetch: stub.fetch });
+  const c = new MnesioClient({ baseUrl: "http://h:7", fetch: stub.fetch });
   const r = await c.skills();
   assert.equal(r.count, 1);
   assert.equal(r.skills[0].kind, "SystemPrompt");
@@ -88,7 +88,7 @@ test("retrieveWithSkills fans out + merges", async () => {
     },
     "/api/search": searchFixture(),
   });
-  const c = new MnemeClient({ baseUrl: "http://h:7", fetch: stub.fetch });
+  const c = new MnesioClient({ baseUrl: "http://h:7", fetch: stub.fetch });
   const bundle = await c.retrieveWithSkills("revenue", 3);
   assert.equal(bundle.skills.length, 1);
   assert.equal(bundle.hits.length, 1);
@@ -97,28 +97,28 @@ test("retrieveWithSkills fans out + merges", async () => {
   assert.equal(stub.calls.length, 2);
 });
 
-test("HTTP 500 surfaces as MnemeError with status + body", async () => {
+test("HTTP 500 surfaces as MnesioError with status + body", async () => {
   const fn: typeof fetch = async () =>
     new Response("boom", { status: 500 });
-  const c = new MnemeClient({ baseUrl: "http://h:7", fetch: fn });
+  const c = new MnesioClient({ baseUrl: "http://h:7", fetch: fn });
   await assert.rejects(
     c.search("x"),
     (err: unknown) => {
-      assert.ok(err instanceof MnemeError);
-      assert.equal((err as MnemeError).status, 500);
-      assert.equal((err as MnemeError).body, "boom");
+      assert.ok(err instanceof MnesioError);
+      assert.equal((err as MnesioError).status, 500);
+      assert.equal((err as MnesioError).body, "boom");
       return true;
     },
   );
 });
 
-test("non-JSON 200 surfaces as MnemeError with status=200", async () => {
+test("non-JSON 200 surfaces as MnesioError with status=200", async () => {
   const fn: typeof fetch = async () =>
     new Response("oh hai", { status: 200 });
-  const c = new MnemeClient({ baseUrl: "http://h:7", fetch: fn });
+  const c = new MnesioClient({ baseUrl: "http://h:7", fetch: fn });
   await assert.rejects(c.search("x"), (err: unknown) => {
-    assert.ok(err instanceof MnemeError);
-    assert.equal((err as MnemeError).status, 200);
+    assert.ok(err instanceof MnesioError);
+    assert.equal((err as MnesioError).status, 200);
     return true;
   });
 });
@@ -141,7 +141,7 @@ test("profile() + agents() + ingestMetrics() route correctly", async () => {
       pii_redacted: 0,
     },
   });
-  const c = new MnemeClient({ baseUrl: "http://h:7", fetch: stub.fetch });
+  const c = new MnesioClient({ baseUrl: "http://h:7", fetch: stub.fetch });
   const p = await c.profile();
   assert.equal(p.user, "alice");
   const a = await c.agents();

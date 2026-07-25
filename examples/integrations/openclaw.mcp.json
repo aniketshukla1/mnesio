@@ -1,12 +1,12 @@
 {
-  "_comment": "OpenClaw MCP server config. Most OpenClaw skills wrap an MCP server; this registers mneme directly. Build first: `cargo build -p mneme-mcp --release`. The key is typically `mcpServers` (check your OpenClaw version). Share MNEME_DATA across agents/users only if they should share memory; otherwise pass a per-user `tenant` on each tool call (mneme's scope boundary).",
+  "_comment": "OpenClaw MCP server config. Most OpenClaw skills wrap an MCP server; this registers mnesio directly. Build first: `cargo build -p mnesio-mcp --release`. The key is typically `mcpServers` (check your OpenClaw version). Share MNESIO_DATA across agents/users only if they should share memory; otherwise pass a per-user `tenant` on each tool call (mnesio's scope boundary).",
   "mcpServers": {
-    "mneme": {
-      "command": "/abs/path/to/mneme/target/release/mneme-mcp",
+    "mnesio": {
+      "command": "/abs/path/to/mnesio/target/release/mnesio-mcp",
       "args": [],
       "env": {
-        "MNEME_DATA": "/var/lib/mneme",
-        "MNEME_EMBEDDER": "fastembed"
+        "MNESIO_DATA": "/var/lib/mnesio",
+        "MNESIO_EMBEDDER": "fastembed"
       }
     }
   }

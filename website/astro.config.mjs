@@ -5,10 +5,10 @@ import remarkGfm from "remark-gfm";
 
 // Deploy target. The site serves at the **root** (`/`). That requires a
 // root-serving Pages target — either a custom domain, or an org/user site repo
-// named `mneme.github.io` — rather than the `github.com/mneme/mneme` *project*
-// path, which GitHub would otherwise serve under `/mneme/`.
+// named `mnesio.github.io` — rather than the `github.com/mnesio/mnesio` *project*
+// path, which GitHub would otherwise serve under `/mnesio/`.
 //
-// To serve under a project sub-path instead, set `BASE = "/mneme"`; the
+// To serve under a project sub-path instead, set `BASE = "/mnesio"`; the
 // `remarkBaseLinks` plugin below then prefixes every internal link so nothing
 // 404s. For a custom domain, also set `site` to that origin and add the domain
 // in Settings → Pages → Custom domain (which writes a CNAME file).
@@ -45,7 +45,7 @@ function remarkBaseLinks() {
 }
 
 export default defineConfig({
-  site: "https://mneme.github.io",
+  site: "https://mnesio.github.io",
   base: BASE || "/",
   // GFM (tables, strikethrough, task lists) for both .md and .mdx. The MDX
   // integration inherits this markdown config by default.
@@ -54,28 +54,28 @@ export default defineConfig({
   },
   integrations: [
     starlight({
-      title: "mneme",
+      title: "mnesio",
       tagline: "A memory that gets verifiably better.",
       description:
         "A self-improving long-term memory layer for AI agents — append-only, bi-temporal, erasable, and verifiably better over time.",
-      logo: { src: "./src/assets/logo.svg", alt: "mneme" },
+      logo: { src: "./src/assets/logo.svg", alt: "mnesio" },
       customCss: ["./src/styles/custom.css"],
       social: [
         {
           icon: "github",
           label: "GitHub",
-          href: "https://github.com/mneme/mneme",
+          href: "https://github.com/mnesio/mnesio",
         },
       ],
       editLink: {
-        baseUrl: "https://github.com/mneme/mneme/edit/main/website/",
+        baseUrl: "https://github.com/mnesio/mnesio/edit/main/website/",
       },
       lastUpdated: true,
       sidebar: [
         {
           label: "Start",
           items: [
-            { label: "Why mneme", slug: "start/why" },
+            { label: "Why mnesio", slug: "start/why" },
             { label: "Getting started", slug: "start/getting-started" },
             { label: "Quickstart (MCP)", slug: "start/quickstart" },
           ],
@@ -99,7 +99,7 @@ export default defineConfig({
         {
           label: "Reference",
           items: [
-            { label: "How mneme differs", slug: "reference/comparison" },
+            { label: "How mnesio differs", slug: "reference/comparison" },
             { label: "Benchmarks", slug: "reference/benchmarks" },
           ],
         },

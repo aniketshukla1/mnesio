@@ -77,8 +77,8 @@ jobs:
       - name: real-crypto features (aead + ed25519)
         if: matrix.config.name == 'default features'
         run: |
-          cargo test -p mneme-privacy --features aead
-          cargo test -p mneme-exchange --features ed25519
+          cargo test -p mnesio-privacy --features aead
+          cargo test -p mnesio-exchange --features ed25519
 
   bench-gate:
     name: bench gate (recall floors)
@@ -94,13 +94,13 @@ jobs:
       # margin below the observed numbers (mini-suites recall 100%, synthetic
       # scale recall 100%) so a real retrieval regression trips CI, not noise.
       - name: memeval — LOCOMO recall floor
-        run: cargo run -p mneme-bench -- memeval --suite locomo --k 10 --embedder mock --min-recall 0.8
+        run: cargo run -p mnesio-bench -- memeval --suite locomo --k 10 --embedder mock --min-recall 0.8
       - name: memeval — LongMemEval recall floor
-        run: cargo run -p mneme-bench -- memeval --suite longmemeval --k 10 --embedder mock --min-recall 0.8
+        run: cargo run -p mnesio-bench -- memeval --suite longmemeval --k 10 --embedder mock --min-recall 0.8
       - name: scale — synthetic recall floor (2k)
-        run: cargo run -p mneme-bench -- scale --sizes 2000 --embedder mock --min-recall 0.95
+        run: cargo run -p mnesio-bench -- scale --sizes 2000 --embedder mock --min-recall 0.95
       - name: edge — adversarial / hard-rule invariants
-        run: cargo run -p mneme-bench -- edge
+        run: cargo run -p mnesio-bench -- edge
       # KV cartridge accuracy-parity (Phase 12 "done when"): the cartridge
       # answers a suite at least as accurately as per-query text-context
       # retrieval, and erasure-by-recompile always holds (enforced regardless of
@@ -108,9 +108,9 @@ jobs:
       # text-context baseline's HNSW retrieval has internal randomness; the
       # cartridge path is deterministic.
       - name: kveval — KV cartridge parity + erasure (locomo)
-        run: cargo run -p mneme-bench -- kveval --suite locomo --min-parity -0.1
+        run: cargo run -p mnesio-bench -- kveval --suite locomo --min-parity -0.1
       - name: kveval — KV cartridge erasure (longmemeval)
-        run: cargo run -p mneme-bench -- kveval --suite longmemeval
+        run: cargo run -p mnesio-bench -- kveval --suite longmemeval
 
   kv-features:
     name: KV cartridge feature gates (clippy)
@@ -129,6 +129,6 @@ jobs:
       # rot — the default matrix never touches them. clippy/check don't run the
       # ignored tests, so no weights are downloaded.
       - name: clippy pretrained + generative + qwen (pure-Rust GPT-2/Qwen2)
-        run: cargo clippy -p mneme-kv --all-targets --features pretrained-kv,generative-kv,qwen-kv -- -D warnings
+        run: cargo clippy -p mnesio-kv --all-targets --features pretrained-kv,generative-kv,qwen-kv -- -D warnings
       - name: clippy candle GPU backend (CPU build on CI)
-        run: cargo clippy -p mneme-kv --all-targets --features candle-kv -- -D warnings
+        run: cargo clippy -p mnesio-kv --all-targets --features candle-kv -- -D warnings

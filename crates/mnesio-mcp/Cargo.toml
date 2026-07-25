@@ -1,0 +1,34 @@
+[package]
+name = "mnesio-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Model Context Protocol (stdio JSON-RPC) server exposing mnesio to agent hosts."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
+
+[[bin]]
+name = "mnesio-mcp"
+path = "src/main.rs"
+
+[dependencies]
+mnesio-core.workspace = true
+mnesio-store.workspace = true
+mnesio-index.workspace = true
+tokio = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+# Integration tests spawn the built binary; tempfile gives us a
+# clean data dir per test run that's auto-removed when the test
+# scope exits.
+tempfile = "3"

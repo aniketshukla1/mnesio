@@ -1,0 +1,23 @@
+[package]
+name = "mnesio-evolve"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Bounded A-MEM-style memory evolution worker for mnesio."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
+
+[dependencies]
+mnesio-core.workspace = true
+tokio.workspace = true
+serde.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+mnesio-llm.workspace = true

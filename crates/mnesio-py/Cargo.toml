@@ -1,0 +1,42 @@
+[package]
+name = "mnesio-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+# `cdylib` is what maturin packages into a Python wheel; `rlib` lets
+# us run Rust-side unit tests against the inner client without
+# spinning up a Python interpreter.
+crate-type = ["cdylib", "rlib"]
+name = "mnesio_py"
+
+[dependencies]
+mnesio-core.workspace = true
+mnesio-store.workspace = true
+mnesio-index.workspace = true
+mnesio-procedural.workspace = true
+tokio = { workspace = true }
+async-trait.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+# pyo3 is pulled in unconditionally — it's small and we always want
+# the bindings compiled. `extension-module` is the feature that
+# disables linking against libpython at build time (cdylib resolves
+# the symbols at load time when Python imports the module). This is
+# the standard maturin pattern.
+[dependencies.pyo3]
+version = "0.22"
+features = ["extension-module"]
+
+[build-dependencies]
+# Tells the linker how to leave Python symbols unresolved (resolved at
+# load time when Python `import`s the module). Without this, macOS
+# builds fail with `symbol __Py_NoneStruct not found`.
+pyo3-build-config = "0.22"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to mneme are documented here. The format is based on
+All notable changes to mnesio are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — with
 the understanding that pre-`1.0.0` releases may break API compatibility
@@ -15,25 +15,25 @@ under **What works in v0.1.0** below; this top section summarises the launch-pre
 work and — importantly — states the known limitations honestly.
 
 ### Added
-- **OpenAI-compatible LLM backend** (`mneme-llm`, `openai` feature) targeting any
+- **OpenAI-compatible LLM backend** (`mnesio-llm`, `openai` feature) targeting any
   `/v1/chat/completions` gateway and defaulting to OpenRouter, so one key reaches
   both Claude and GPT models. The API key is read from the environment only.
-  Wired into `mneme-bench` as `--llm openrouter` / `--executor openrouter`.
-- **Phase 16 retrieval components** in `mneme-index`, both **opt-in**:
+  Wired into `mnesio-bench` as `--llm openrouter` / `--executor openrouter`.
+- **Phase 16 retrieval components** in `mnesio-index`, both **opt-in**:
   `rerank::LexicalReranker` (a content-aware final stage over a new
   `ContentProvider` seam, scoring query coverage, temporal date match, phrase
   overlap, and an update cue, with coverage weighted by candidate-set IDF) and
   `context_tree::ContextTree` (tag-derived domain/topic hierarchy that routes a
   query to the best-matching branch and only ever narrows).
-- `mneme-bench memeval --rerank` and `--compare-rerank`, the latter running a
+- `mnesio-bench memeval --rerank` and `--compare-rerank`, the latter running a
   *paired* A/B over a single ingested index.
 - Community documentation: `CONTRIBUTING.md`, `SECURITY.md`,
   `CODE_OF_CONDUCT.md`.
 - GitHub Pages deploy workflow for the docs site, and a
-  "How mneme differs" comparison page.
+  "How mnesio differs" comparison page.
 
 ### Changed
-- Filled in crates.io metadata across all 19 crates; `mneme-py` is marked
+- Filled in crates.io metadata across all 19 crates; `mnesio-py` is marked
   `publish = false` since it ships to PyPI via maturin.
 - Standardised three inconsistent repository URLs (including the literal
   `YOURNAME` placeholder in the workspace manifest) onto one.
@@ -59,7 +59,7 @@ work and — importantly — states the known limitations honestly.
 - **No LoCoMo number is published yet.** The harness and the frontier-model path
   are in place; the run itself is still outstanding.
 
-> **The wedge is real.** mneme's procedural-memory compiler is the first
+> **The wedge is real.** mnesio's procedural-memory compiler is the first
 > open-source implementation of a GEPA-style reflective loop with a
 > **mechanically non-bypassable commit gate** — the regression guard the
 > literature ([LangMem](https://github.com/langchain-ai/langmem),
@@ -133,15 +133,15 @@ work and — importantly — states the known limitations honestly.
   *why* a proposal was rejected, not just *that* it was.
 
 #### Infrastructure
-- **`mneme-llm` crate**: `FakeLlmClient` (deterministic, dep-free) +
+- **`mnesio-llm` crate**: `FakeLlmClient` (deterministic, dep-free) +
   `OllamaLlmClient` (real local backend, feature-gated behind `ollama`,
   default-on).
-- **`DemoLlmClient`** in `mneme-server`: content-derived responses for
+- **`DemoLlmClient`** in `mnesio-server`: content-derived responses for
   every prompt the workers issue (note-construction, link-generation,
   evolution-proposal, reflection, proposal). Demo runs offline.
 - **Vendored Chart.js** — no CDN dependency. Self-contained demo.
-- **`MNEME_EVOLVE` / `MNEME_PROCEDURAL`** env flags for opt-in worker
-  enablement. `MNEME_EVOLVE_LLM=ollama` swaps to a real model.
+- **`MNESIO_EVOLVE` / `MNESIO_PROCEDURAL`** env flags for opt-in worker
+  enablement. `MNESIO_EVOLVE_LLM=ollama` swaps to a real model.
 - **Apache-2.0 LICENSE**, **GitHub Actions CI** (fmt + clippy + test,
   both feature configurations, with cancellation + caching).
 
@@ -167,13 +167,13 @@ dedicated test that fails if the property breaks:
 ### Tests
 
 ```
-mneme-core        :   3 tests
-mneme-llm         :  27 tests
-mneme-index       :  57 tests
-mneme-evolve      :  11 tests
-mneme-procedural  :  94 unit + 5 integration tests
-mneme-server      :  20 tests
-mneme-store       :   1 test
+mnesio-core        :   3 tests
+mnesio-llm         :  27 tests
+mnesio-index       :  57 tests
+mnesio-evolve      :  11 tests
+mnesio-procedural  :  94 unit + 5 integration tests
+mnesio-server      :  20 tests
+mnesio-store       :   1 test
 ──────────────────────────────
 TOTAL             : 218 tests · all passing on both feature configs
 ```
@@ -181,9 +181,9 @@ TOTAL             : 218 tests · all passing on both feature configs
 ### Try it
 
 ```bash
-git clone https://github.com/mneme/mneme.git
-cd mneme
-MNEME_DEMO=1 MNEME_PROCEDURAL=on cargo run -p mneme-server
+git clone https://github.com/mnesio/mnesio.git
+cd mnesio
+MNESIO_DEMO=1 MNESIO_PROCEDURAL=on cargo run -p mnesio-server
 ```
 
 Open <http://127.0.0.1:7777/dashboard> and watch the **PROCEDURAL**
@@ -204,9 +204,9 @@ held at 100%.
   `Skill`, `RetrievalRule`, `Reflection` kinds are defined but error
   visibly when proposed. Coming in subsequent slices.
 - **Demo judges are content-derived, not LLM-driven.** The
-  `LlmJudge` shipping in `mneme-procedural` works end-to-end; the demo
+  `LlmJudge` shipping in `mnesio-procedural` works end-to-end; the demo
   uses fake judges so it runs offline. Pointing it at Ollama via
-  `MNEME_EVOLVE_LLM=ollama` exercises the real path.
+  `MNESIO_EVOLVE_LLM=ollama` exercises the real path.
 - **Single-writer to the event log.** Multi-host deployments are not
   yet supported — that's the Phase 4 graph store's territory.
 
@@ -233,4 +233,4 @@ Embedded references:
 
 ---
 
-[0.1.0]: https://github.com/mneme/mneme/releases/tag/v0.1.0
+[0.1.0]: https://github.com/mnesio/mnesio/releases/tag/v0.1.0

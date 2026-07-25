@@ -1,5 +1,5 @@
 ---
-title: mneme
+title: mnesio
 description: A self-improving long-term memory layer for AI agents — append-only, bi-temporal, erasable, and verifiably better over time.
 template: splash
 hero:
@@ -11,12 +11,12 @@ hero:
       link: /start/getting-started/
       icon: right-arrow
       variant: primary
-    - text: Why mneme
+    - text: Why mnesio
       link: /start/why/
       icon: open-book
       variant: minimal
     - text: View on GitHub
-      link: https://github.com/mneme/mneme
+      link: https://github.com/mnesio/mnesio
       icon: external
       variant: minimal
 ---
@@ -26,7 +26,7 @@ import { Card, CardGrid, LinkCard, LinkButton, Aside, Tabs, TabItem, Steps } fro
 <div class="lead">
 
 Most agent-memory systems are *storage-shaped*: they remember facts.
-**mneme** is a Rust-native memory layer with a different bet — the agent gets
+**mnesio** is a Rust-native memory layer with a different bet — the agent gets
 **better at doing things** over time, behind a safety gate that no
 self-improvement can bypass. Every belief traces to its source events, every
 version is kept, and a forgotten subject can be made cryptographically
@@ -60,7 +60,7 @@ unreadable while the log stays append-only.
 <div class="honesty">
 
 **Honest numbers only.** Every figure on this site is measured by the harness in
-`mneme-bench` and reproduced in the [Benchmarks](/reference/benchmarks/) page
+`mnesio-bench` and reproduced in the [Benchmarks](/reference/benchmarks/) page
 with its exact conditions. We caveat what's a stand-in and never publish a number
 we can't rerun.
 
@@ -94,7 +94,7 @@ we can't rerun.
 </CardGrid>
 
 <h2 class="section-title">Three promises, made literal</h2>
-<p class="section-sub">mneme is not a place to put facts.</p>
+<p class="section-sub">mnesio is not a place to put facts.</p>
 
 <CardGrid>
   <Card title="Verifiably better" icon="bars">
@@ -125,30 +125,30 @@ we can't rerun.
 // Claude Desktop / OpenClaw / Hermes — add to your MCP config
 {
   "mcpServers": {
-    "mneme": {
-      "command": "/path/to/mneme/target/release/mneme-mcp",
+    "mnesio": {
+      "command": "/path/to/mnesio/target/release/mnesio-mcp",
       "args": []
     }
   }
 }
 ```
-Tools exposed: `mneme_write_memory`, `mneme_search`, `mneme_record_outcome`.
+Tools exposed: `mnesio_write_memory`, `mnesio_search`, `mnesio_record_outcome`.
   </TabItem>
   <TabItem label="Rust">
 ```rust
-use mneme_store::FjallEventLog;
-use mneme_core::EventLog;
+use mnesio_store::FjallEventLog;
+use mnesio_core::EventLog;
 
-let log = FjallEventLog::open("./mneme-data")?;
+let log = FjallEventLog::open("./mnesio-data")?;
 // Writes are events on an append-only log; indexes are materialized views.
 log.append(event).await?;
 ```
   </TabItem>
   <TabItem label="Python">
 ```python
-from mneme import Client
+from mnesio import Client
 
-client = Client("./mneme-data")
+client = Client("./mnesio-data")
 client.write("Alice was promoted to Staff Engineer in March 2024")
 hits = client.search("what is Alice's role?", k=5)
 ```
@@ -164,42 +164,42 @@ hits = client.search("what is Alice's role?", k=5)
 
 <CardGrid>
   <LinkCard title="Architecture" description="The event log, materialized views, and the seams that keep providers swappable." href="/concepts/architecture/" />
-  <LinkCard title="The seven hard rules" description="The invariants that make the frontier bets safe — and what mneme will never do." href="/concepts/hard-rules/" />
+  <LinkCard title="The seven hard rules" description="The invariants that make the frontier bets safe — and what mnesio will never do." href="/concepts/hard-rules/" />
   <LinkCard title="Benchmarks" description="Every published number, with the exact conditions to reproduce it." href="/reference/benchmarks/" />
-  <LinkCard title="How mneme differs" description="Where mneme is alone against the field — and, honestly, where it's behind." href="/reference/comparison/" />
+  <LinkCard title="How mnesio differs" description="Where mnesio is alone against the field — and, honestly, where it's behind." href="/reference/comparison/" />
 </CardGrid>
 
-{/* TODO(launch): placeholder funding links disabled — github.com/sponsors/mneme,
-    opencollective.com/mneme, ko-fi.com/mneme and liberapay.com/mneme are not
+{/* TODO(launch): placeholder funding links disabled — github.com/sponsors/mnesio,
+    opencollective.com/mnesio, ko-fi.com/mnesio and liberapay.com/mnesio are not
     real accounts for this project. Create the accounts, update the four hrefs,
     then delete this comment wrapper to re-enable the section. */}
 {/*
-<h2 class="section-title">Support mneme</h2>
+<h2 class="section-title">Support mnesio</h2>
 <p class="section-sub">Independent, Apache-2.0, built in the open. Funding goes to development time + eval compute — not a paywall.</p>
 
 <div class="support-grid">
-  <a class="support-card" href="https://github.com/sponsors/mneme" target="_blank" rel="noopener">
+  <a class="support-card" href="https://github.com/sponsors/mnesio" target="_blank" rel="noopener">
     <img src="/logos/github-sponsors.svg" alt="GitHub Sponsors logo" width="36" height="36" loading="lazy" />
     <span class="support-meta">
       <span class="support-name">GitHub Sponsors</span>
       <span class="support-desc">Recurring or one-time, right next to the code. 0% platform fees.</span>
     </span>
   </a>
-  <a class="support-card" href="https://opencollective.com/mneme" target="_blank" rel="noopener">
+  <a class="support-card" href="https://opencollective.com/mnesio" target="_blank" rel="noopener">
     <img src="/logos/open-collective.svg" alt="Open Collective logo" width="36" height="36" loading="lazy" />
     <span class="support-meta">
       <span class="support-name">Open Collective</span>
       <span class="support-desc">Transparent budget and company backers — a path to a foundation.</span>
     </span>
   </a>
-  <a class="support-card" href="https://ko-fi.com/mneme" target="_blank" rel="noopener">
+  <a class="support-card" href="https://ko-fi.com/mnesio" target="_blank" rel="noopener">
     <img src="/logos/ko-fi.svg" alt="Ko-fi logo" width="36" height="36" loading="lazy" />
     <span class="support-meta">
       <span class="support-name">Ko-fi</span>
       <span class="support-desc">Quick one-off tips, no account needed.</span>
     </span>
   </a>
-  <a class="support-card" href="https://liberapay.com/mneme" target="_blank" rel="noopener">
+  <a class="support-card" href="https://liberapay.com/mnesio" target="_blank" rel="noopener">
     <img src="/logos/liberapay.svg" alt="Liberapay logo" width="36" height="36" loading="lazy" />
     <span class="support-meta">
       <span class="support-name">Liberapay</span>
