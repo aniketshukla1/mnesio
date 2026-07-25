@@ -24,7 +24,8 @@ crates/mnesio-bench/data/cache/
 website/node_modules/
 website/dist/
 website/.astro/
-website/package-lock.json
+# Note: website/package-lock.json IS committed — CI needs it for `npm ci`
+# and setup-node's dependency cache.
 
 # Local agent/editor tooling config — not part of the published project
 .claude/
