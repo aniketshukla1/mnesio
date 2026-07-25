@@ -3,16 +3,15 @@ import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import remarkGfm from "remark-gfm";
 
-// Deploy target. The site serves at the **root** (`/`). That requires a
-// root-serving Pages target — either a custom domain, or an org/user site repo
-// named `mnesio.github.io` — rather than the `github.com/mnesio/mnesio` *project*
-// path, which GitHub would otherwise serve under `/mnesio/`.
+// Deploy target. `github.com/mnesio/mnesio` is a *project* repo, so GitHub
+// Pages serves it under `/mnesio/` — hence `BASE = "/mnesio"`, and the
+// `remarkBaseLinks` plugin below prefixes every internal link so nothing 404s.
+// Live at: https://mnesio.github.io/mnesio/
 //
-// To serve under a project sub-path instead, set `BASE = "/mnesio"`; the
-// `remarkBaseLinks` plugin below then prefixes every internal link so nothing
-// 404s. For a custom domain, also set `site` to that origin and add the domain
-// in Settings → Pages → Custom domain (which writes a CNAME file).
-const BASE = "";
+// To move to a custom domain (e.g. https://mnesio.dev) served at the root:
+// set `BASE = ""`, set `site` to that origin, and add the domain in
+// Settings → Pages → Custom domain (which writes a CNAME file).
+const BASE = "/mnesio";
 
 /**
  * Prefix root-absolute markdown links with the deploy `base`.
