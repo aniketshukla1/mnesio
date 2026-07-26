@@ -3,10 +3,21 @@
   <p><strong>A self-improving long-term memory layer for AI agents, built in Rust.</strong></p>
 
   <p>
+    <a href="https://mnesio.github.io/mnesio/"><img alt="Docs" src="https://img.shields.io/badge/docs-mnesio.github.io-2dd4bf"></a>
     <a href="https://github.com/mnesio/mnesio/actions"><img alt="Build Status" src="https://img.shields.io/badge/build-passing-brightgreen"></a>
-    <a href="https://crates.io/crates/mnesio"><img alt="Version" src="https://img.shields.io/badge/version-v0.1.0-blue"></a>
+    <a href="https://github.com/mnesio/mnesio/releases"><img alt="Version" src="https://img.shields.io/badge/version-v0.1.0-blue"></a>
     <a href="https://github.com/mnesio/mnesio/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
-    <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-509%20passing-brightgreen"></a>
+    <a href="https://github.com/mnesio/mnesio/blob/main/CHANGELOG.md"><img alt="Tests" src="https://img.shields.io/badge/tests-509%20passing-brightgreen"></a>
+  </p>
+
+  <p>
+    <a href="https://mnesio.github.io/mnesio/"><strong>📚 Documentation</strong></a>
+    &nbsp;·&nbsp;
+    <a href="https://mnesio.github.io/mnesio/start/getting-started/">Getting started</a>
+    &nbsp;·&nbsp;
+    <a href="https://mnesio.github.io/mnesio/reference/comparison/">How mnesio differs</a>
+    &nbsp;·&nbsp;
+    <a href="https://mnesio.github.io/mnesio/reference/benchmarks/">Benchmarks</a>
   </p>
 </div>
 
