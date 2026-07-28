@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a reproducible problem in mnesio.
+title: "[bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem. A small reproduction is the fastest path to a fix.
+  - type: input
+    id: version
+    attributes:
+      label: mnesio version or commit
+      placeholder: "v0.1.0 or 0123abcd"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include your OS, Rust version, and relevant feature flags.
+      placeholder: "macOS 15, rustc 1.86, --features ollama"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Tell us what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the error or unexpected result. Please remove secrets and personal data.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide the smallest command, code sample, or test that reproduces the problem.
+      placeholder: |
+        1. Run ...
+        2. Write ...
+        3. Observe ...
+    validations:
+      required: true

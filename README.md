@@ -1,13 +1,12 @@
 <div align="center">
   <h1>🧠 mnesio</h1>
-  <p><strong>A self-improving long-term memory layer for AI agents, built in Rust.</strong></p>
+  <p><strong>Long-term memory for AI agents that learns from outcomes, with a safety gate before every improvement.</strong></p>
 
   <p>
     <a href="https://mnesio.github.io/mnesio/"><img alt="Docs" src="https://img.shields.io/badge/docs-mnesio.github.io-2dd4bf"></a>
-    <a href="https://github.com/mnesio/mnesio/actions"><img alt="Build Status" src="https://img.shields.io/badge/build-passing-brightgreen"></a>
-    <a href="https://github.com/mnesio/mnesio/releases"><img alt="Version" src="https://img.shields.io/badge/version-v0.1.0-blue"></a>
+    <a href="https://github.com/mnesio/mnesio/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/mnesio/mnesio/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+    <a href="https://github.com/mnesio/mnesio/tags"><img alt="Latest tag" src="https://img.shields.io/github/v/tag/mnesio/mnesio?sort=semver"></a>
     <a href="https://github.com/mnesio/mnesio/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
-    <a href="https://github.com/mnesio/mnesio/blob/main/CHANGELOG.md"><img alt="Tests" src="https://img.shields.io/badge/tests-509%20passing-brightgreen"></a>
   </p>
 
   <p>
@@ -23,7 +22,18 @@
 
 ---
 
-Most agent memory systems (Mem0, Zep, Letta, Cognee) are **storage-shaped**: they remember facts. mnesio's differentiator is **procedural self-improvement** — the agent gets *better at doing things* over time, with a regression guard the literature omits.
+## Let agents improve without silently regressing
+
+mnesio is a Rust-native long-term memory layer for agents that turns real outcomes into improved, versioned policies: prompts, heuristics, and retrieval rules. Each candidate improvement is evaluated in shadow mode and can activate only after it clears a mechanically enforced safety gate.
+
+Use mnesio when you need an agent system to:
+
+- retain and retrieve durable, evolving knowledge;
+- learn from outcomes without blindly rewriting its behavior;
+- prove what it knew at a past moment, or erase data through crypto-shredding; and
+- integrate through an HTTP service, MCP server, Python bindings, or Node SDK.
+
+The core difference is **procedural self-improvement**: mnesio helps an agent get *better at doing things* over time, rather than only remembering more facts.
 
 Two continuous loops operate over a single append-only event log:
 

@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest an improvement to mnesio.
+title: "[feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. The most useful requests describe the agent workflow they would unlock.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What is difficult or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior or API you would like to see.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or other approaches have you tried?
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, sketches, benchmark data, or implementation ideas are welcome.

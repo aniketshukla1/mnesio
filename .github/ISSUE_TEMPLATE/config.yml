@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://mnesio.github.io/mnesio/
+    about: Installation, integration, architecture, and benchmark guidance.
+  - name: GitHub Discussions
+    url: https://github.com/mnesio/mnesio/discussions
+    about: Ask questions, share ideas, and discuss agent-memory design.
+  - name: Security policy
+    url: https://github.com/mnesio/mnesio/security/policy
+    about: Please report security vulnerabilities privately, not in a public issue.
